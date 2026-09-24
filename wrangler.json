@@ -1,0 +1,7 @@
+{
+  "$schema": "https://developers.cloudflare.com/workers/wrangler/config-schema.json",
+  "name": "yeptennis",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-24",
+  "assets": { "directory": "./public", "binding": "ASSETS" }
+}
