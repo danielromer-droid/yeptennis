@@ -303,181 +303,22 @@ function match(x, tour) {
    ========================================================= */
 
 async function today(env) {
+  const d = new Date().toISOString().slice(0, 10);
 
-  /*
-     IMPORTANT:
-     The Tennis API's current "today" fixtures
-     endpoint does NOT require a date in the URL.
-  */
+  const result = await call(
+    `/tennis/v2/atp/fixtures/${d}?include=round,tournament&pageNo=1&pageSize=1&filter=PlayerGroup:singles`,
+    env
+  );
 
-  const results = await Promise.allSettled([
-
-    call(
-      "/tennis/v2/atp/fixtures" +
-      "?filter=PlayerGroup:singles" +
-      "&pageNo=1" +
-      "&pageSize=500",
-      env
-    ),
-
-    call(
-      "/tennis/v2/wta/fixtures" +
-      "?filter=PlayerGroup:singles" +
-      "&pageNo=1" +
-      "&pageSize=500",
-      env
-    ),
-
-    call(
-      "/tennis/v2/extend/api/events/live",
-      env
-    )
-  ]);
-
-  const matches = [];
-
-  /*
-     ATP
-  */
-
-  if (results[0].status === "fulfilled") {
-
-    matches.push(
-      ...arr(results[0].value).map(
-        x => match(x, "atp")
-      )
-    );
-  }
-
-  /*
-     WTA
-  */
-
-  if (results[1].status === "fulfilled") {
-
-    matches.push(
-      ...arr(results[1].value).map(
-        x => match(x, "wta")
-      )
-    );
-  }
-
-  /*
-     LIVE MATCHES
-  */
-
-  let liveMatches = [];
-
-  if (results[2].status === "fulfilled") {
-
-    const liveData = arr(results[2].value);
-
-    liveMatches = liveData.map(x => {
-
-      const p1 = val(
-        x,
-        ["player1", "player1Name"],
-        ""
-      );
-
-      const p2 = val(
-        x,
-        ["player2", "player2Name"],
-        ""
-      );
-
-      return {
-        id: val(x, ["id"], null),
-
-        player1: p1,
-        player2: p2,
-
-        score: val(
-          x,
-          ["score"],
-          ""
-        ),
-
-        points: val(
-          x,
-          ["points"],
-          ""
-        ),
-
-        status: val(
-          x,
-          ["status"],
-          "Live"
-        ),
-
-        tour: val(
-          x,
-          ["tourType"],
-          ""
-        ),
-
-        live: true,
-
-        startTimestamp: val(
-          x,
-          ["startTimestamp"],
-          null
-        )
-      };
-    });
-
-    /*
-       Update the normal fixture list
-       with live information.
-    */
-
-    for (const live of liveMatches) {
-
-      const found = matches.find(m => {
-
-        const samePlayers =
-          (
-            m.player1 === live.player1 &&
-            m.player2 === live.player2
-          ) ||
-          (
-            m.player1 === live.player2 &&
-            m.player2 === live.player1
-          );
-
-        return samePlayers;
-      });
-
-      if (found) {
-
-        found.live = true;
-
-        found.status = "Live";
-
-        if (live.score) {
-          found.score = live.score;
-        }
-
-        found.points = live.points;
-      }
-    }
-  }
-
-  const date =
-    new Date()
-      .toISOString()
-      .slice(0, 10);
+  const matches = arr(result);
 
   return {
     ok: true,
-    date,
-    matches,
-    live: liveMatches,
-    count: matches.length,
-    liveCount: liveMatches.length
+    date: d,
+    rawFirstMatch: matches[0] || null,
+    totalReturned: matches.length
   };
 }
-
 /* =========================================================
    TOURNAMENT CALENDAR
    ========================================================= */
