@@ -1,7 +1,10 @@
 {
   "$schema": "https://developers.cloudflare.com/workers/wrangler/config-schema.json",
-  "name": "yeptennis",
+  "name": "shrill-water-7a45",
   "main": "src/index.js",
   "compatibility_date": "2026-09-24",
-  "assets": { "directory": "./public", "binding": "ASSETS" }
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  }
 }
