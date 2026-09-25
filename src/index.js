@@ -958,169 +958,187 @@ async function calendar(env) {
    RSS
 ========================================================= */
 
-
 function xml(xml, source) {
 
   return [...xml.matchAll(
     /<item\b[\s\S]*?<\/item>/gi
   )]
-  .map(m => m[0])
-  .map(item => {
+    .map(match => match[0])
+    .map(item => {
 
-    const clean = value =>
-      String(value || "")
-        .replace(
-          /<!\[CDATA\[([\s\S]*?)\]\]>/g,
-          "$1"
-        )
-        .replace(/<[^>]+>/g, "")
-        .replace(/&amp;/g, "&")
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .replace(/&apos;/g, "'")
-        .trim();
+      function clean(value) {
 
+        return String(value || "")
+          .replace(
+            /<!\[CDATA\[([\s\S]*?)\]\]>/g,
+            "$1"
+          )
+          .replace(
+            /<[^>]+>/g,
+            ""
+          )
+          .replace(
+            /&amp;/g,
+            "&"
+          )
+          .replace(
+            /&quot;/g,
+            '"'
+          )
+          .replace(
+            /&#39;/g,
+            "'"
+          )
+          .replace(
+            /&apos;/g,
+            "'"
+          )
+          .trim();
 
-    const getTag = tag => {
-
-      const match = item.match(
-        new RegExp(
-          `<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`,
-          "i"
-        )
-      );
-
-      return match
-        ? clean(match[1])
-        : "";
-    };
-
-
-    const getAttribute = (
-      tag,
-      attribute
-    ) => {
-
-      const match = item.match(
-        new RegExp(
-          `<${tag}\\b[^>]*\\b${attribute}=["']([^"']+)["']`,
-          "i"
-        )
-      );
-
-      return match
-        ? clean(match[1])
-        : "";
-    };
-
-
-    const title =
-      getTag("title");
-
-
-    const linkMatch =
-      item.match(
-        /<link>([\s\S]*?)<\/link>/i
-      );
-
-
-    const link =
-      linkMatch
-        ? clean(linkMatch[1])
-        : "";
-
-
-    /*
-      BBC RSS normally provides the
-      article image through media:thumbnail
-      or media:content.
-    */
-
-    let image =
-      getAttribute(
-        "media:thumbnail",
-        "url"
-      );
-
-
-    if (!image) {
-
-      image =
-        getAttribute(
-          "media:content",
-          "url"
-        );
-    }
-
-
-    if (!image) {
-
-      image =
-        getAttribute(
-          "enclosure",
-          "url"
-        );
-    }
-
-
-    if (!image) {
-
-      image =
-        getAttribute(
-          "image",
-          "url"
-        );
-    }
-
-
-    const date =
-      getTag("pubDate") ||
-      getTag("published") ||
-      getTag("updated");
-
-
-    let dateLabel = "";
-
-
-    if (date) {
-
-      const parsed =
-        new Date(date);
-
-
-      if (!Number.isNaN(
-        parsed.getTime()
-      )) {
-
-        dateLabel =
-          parsed.toLocaleDateString(
-            "en-GB",
-            {
-              day: "numeric",
-              month: "short"
-            }
-          );
       }
-    }
 
 
-    return {
-      title,
-      link,
-      image,
-      source,
-      dateLabel
-    };
+      function getTag(tag) {
 
-  })
-  .filter(
-    item =>
-      item.title &&
-      item.link
-  );
+        const match =
+          item.match(
+            new RegExp(
+              `<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`,
+              "i"
+            )
+          );
+
+
+        return match
+          ? clean(match[1])
+          : "";
+
+      }
+
+
+      function getAttribute(
+        tag,
+        attribute
+      ) {
+
+        const match =
+          item.match(
+            new RegExp(
+              `<${tag}\\b[^>]*\\b${attribute}=["']([^"']+)["']`,
+              "i"
+            )
+          );
+
+
+        return match
+          ? clean(match[1])
+          : "";
+
+      }
+
+
+      const title =
+        getTag("title");
+
+
+      const link =
+        getTag("link");
+
+
+      /*
+        BBC images can appear as:
+        media:thumbnail
+        media:content
+        enclosure
+      */
+
+      let image =
+        getAttribute(
+          "media:thumbnail",
+          "url"
+        );
+
+
+      if (!image) {
+
+        image =
+          getAttribute(
+            "media:content",
+            "url"
+          );
+
+      }
+
+
+      if (!image) {
+
+        image =
+          getAttribute(
+            "enclosure",
+            "url"
+          );
+
+      }
+
+
+      const date =
+        getTag("pubDate") ||
+        getTag("published") ||
+        getTag("updated");
+
+
+      let dateLabel = "";
+
+
+      if (date) {
+
+        const parsed =
+          new Date(date);
+
+
+        if (
+          !Number.isNaN(
+            parsed.getTime()
+          )
+        ) {
+
+          dateLabel =
+            parsed.toLocaleDateString(
+              "en-GB",
+              {
+                day: "numeric",
+                month: "short"
+              }
+            );
+
+        }
+
+      }
+
+
+      return {
+
+        title,
+
+        link,
+
+        image,
+
+        source,
+
+        dateLabel
+
+      };
+
+    })
+    .filter(
+      item =>
+        item.title &&
+        item.link
+    );
+
 }
-
-
+    
 /* =========================================================
    NEWS
 ========================================================= */
