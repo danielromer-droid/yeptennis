@@ -1,5 +1,6 @@
 /* =====================================================
    YepTennis frontend
+   ATP / WTA / Grand Slams / Finals / 1000 / 500
    ===================================================== */
 
 let todayData = null;
@@ -7,14 +8,16 @@ let calendarData = null;
 let newsData = null;
 let resultsFilter = "all";
 
+
 document.addEventListener("DOMContentLoaded", () => {
+
   setupNavigation();
   setupResultTabs();
 
   loadToday();
   loadNews();
   loadCalendar();
-  loadRankings();
+
 });
 
 
@@ -23,30 +26,85 @@ document.addEventListener("DOMContentLoaded", () => {
    ===================================================== */
 
 function setupNavigation() {
-  const menu = document.querySelector(".menu");
-  const mobileNav = document.querySelector(".mobile-nav");
+
+  const menu =
+    document.querySelector(".menu");
+
+  const mobileNav =
+    document.querySelector(".mobile-nav");
+
 
   if (menu && mobileNav) {
+
     menu.addEventListener("click", () => {
+
       mobileNav.classList.toggle("open");
+
     });
 
-    mobileNav.querySelectorAll("a").forEach(link => {
-      link.addEventListener("click", () => {
-        mobileNav.classList.remove("open");
+
+    mobileNav
+      .querySelectorAll("a")
+      .forEach(link => {
+
+        link.addEventListener(
+          "click",
+          () => {
+
+            mobileNav.classList.remove(
+              "open"
+            );
+
+          }
+        );
+
       });
-    });
+
   }
 
-  document.querySelectorAll("nav a").forEach(link => {
-    link.addEventListener("click", () => {
-      document.querySelectorAll("nav a").forEach(x => {
-        x.classList.remove("active");
-      });
 
-      link.classList.add("active");
+  document
+    .querySelectorAll(
+      ".desktop-nav a, .mobile-nav a"
+    )
+    .forEach(link => {
+
+      link.addEventListener(
+        "click",
+        () => {
+
+          document
+            .querySelectorAll(
+              ".desktop-nav a"
+            )
+            .forEach(x => {
+
+              x.classList.remove(
+                "active"
+              );
+
+            });
+
+
+          const desktopLink =
+            document.querySelector(
+              `.desktop-nav a[href="${link.getAttribute("href")}"]`
+            );
+
+
+          if (desktopLink) {
+
+            desktopLink.classList.add(
+              "active"
+            );
+
+          }
+
+        }
+      );
+
     });
-  });
+
 }
 
 
@@ -55,26 +113,56 @@ function setupNavigation() {
    ===================================================== */
 
 function setupResultTabs() {
-  const tabs = document.querySelector("#results-tabs");
+
+  const tabs =
+    document.querySelector(
+      "#results-tabs"
+    );
+
 
   if (!tabs) return;
 
-  tabs.querySelectorAll("button[data-filter]").forEach(button => {
 
-    button.addEventListener("click", () => {
+  tabs
+    .querySelectorAll(
+      "button[data-filter]"
+    )
+    .forEach(button => {
 
-      resultsFilter = button.dataset.filter || "all";
+      button.addEventListener(
+        "click",
+        () => {
 
-      tabs.querySelectorAll("button").forEach(x => {
-        x.classList.remove("selected");
-      });
+          resultsFilter =
+            button.dataset.filter ||
+            "all";
 
-      button.classList.add("selected");
 
-      renderResults();
+          tabs
+            .querySelectorAll(
+              "button"
+            )
+            .forEach(x => {
+
+              x.classList.remove(
+                "selected"
+              );
+
+            });
+
+
+          button.classList.add(
+            "selected"
+          );
+
+
+          renderResults();
+
+        }
+      );
+
     });
 
-  });
 }
 
 
@@ -84,32 +172,51 @@ function setupResultTabs() {
 
 async function fetchJSON(url) {
 
-  const response = await fetch(url, {
-    cache: "no-store",
-    headers: {
-      "Accept": "application/json"
-    }
-  });
+  const response =
+    await fetch(url, {
+      cache: "no-store",
+      headers: {
+        "Accept": "application/json"
+      }
+    });
 
-  const text = await response.text();
+
+  const text =
+    await response.text();
+
 
   let data = {};
 
+
   try {
-    data = text ? JSON.parse(text) : {};
+
+    data =
+      text
+        ? JSON.parse(text)
+        : {};
+
   } catch {
-    throw new Error(`Invalid response from ${url}`);
+
+    throw new Error(
+      `Invalid response from ${url}`
+    );
+
   }
 
+
   if (!response.ok) {
+
     throw new Error(
       data.message ||
       data.error ||
       `HTTP ${response.status}`
     );
+
   }
 
+
   return data;
+
 }
 
 
@@ -119,17 +226,31 @@ async function fetchJSON(url) {
 
 async function loadToday() {
 
-  const container = document.querySelector("#results-list");
+  const container =
+    document.querySelector(
+      "#results-list"
+    );
+
 
   if (!container) return;
 
+
   try {
 
-    todayData = await fetchJSON("/api/today");
+    todayData =
+      await fetchJSON(
+        "/api/today"
+      );
 
-    if (todayData && todayData.error) {
-      throw new Error(todayData.error);
+
+    if (todayData?.error) {
+
+      throw new Error(
+        todayData.error
+      );
+
     }
+
 
     updateResultsDate();
 
@@ -137,16 +258,23 @@ async function loadToday() {
 
   } catch (error) {
 
-    console.error("YepTennis results:", error);
+    console.error(
+      "YepTennis results:",
+      error
+    );
+
 
     container.innerHTML = `
       <div class="error-state">
-        Results are temporarily unavailable.
+        Today's results are temporarily unavailable.
       </div>
     `;
 
+
     updateResultsDate();
+
   }
+
 }
 
 
@@ -156,21 +284,46 @@ async function loadToday() {
 
 function rawMatches() {
 
-  if (!todayData) return [];
+  if (!todayData) {
+    return [];
+  }
 
-  if (Array.isArray(todayData.matches)) {
+
+  if (
+    Array.isArray(
+      todayData.matches
+    )
+  ) {
+
     return todayData.matches;
+
   }
 
-  if (Array.isArray(todayData.events)) {
+
+  if (
+    Array.isArray(
+      todayData.events
+    )
+  ) {
+
     return todayData.events;
+
   }
 
-  if (Array.isArray(todayData.data)) {
+
+  if (
+    Array.isArray(
+      todayData.data
+    )
+  ) {
+
     return todayData.data;
+
   }
+
 
   return [];
+
 }
 
 
@@ -184,6 +337,7 @@ function normaliseMatch(match) {
     match.player1 ||
     match.home ||
     {};
+
 
   const player2 =
     match.player2 ||
@@ -241,12 +395,15 @@ function normaliseMatch(match) {
     "";
 
 
-  if (typeof score === "object") {
+  if (
+    typeof score === "object"
+  ) {
 
     score =
       score.display ||
       score.score ||
       "";
+
   }
 
 
@@ -286,18 +443,30 @@ function normaliseMatch(match) {
 
 
   return {
+
     player1: name1,
+
     player2: name2,
+
     country1: country1,
+
     country2: country2,
+
     score: score || "",
+
     status: status,
+
     tournament: tournamentName,
-    tour: tour.includes("wta")
-      ? "wta"
-      : "atp",
+
+    tour:
+      tour.includes("wta")
+        ? "wta"
+        : "atp",
+
     live: live
+
   };
+
 }
 
 
@@ -308,30 +477,35 @@ function normaliseMatch(match) {
 function getFilteredMatches() {
 
   const matches =
-    rawMatches().map(normaliseMatch);
+    rawMatches()
+      .map(normaliseMatch);
 
 
   switch (resultsFilter) {
 
     case "atp":
+
       return matches.filter(
         x => x.tour === "atp"
       );
 
 
     case "wta":
+
       return matches.filter(
         x => x.tour === "wta"
       );
 
 
     case "live":
+
       return matches.filter(
         x => x.live
       );
 
 
     case "completed":
+
       return matches.filter(
         x =>
           /final|completed|finished/i.test(
@@ -341,8 +515,11 @@ function getFilteredMatches() {
 
 
     default:
+
       return matches;
+
   }
+
 }
 
 
@@ -353,7 +530,10 @@ function getFilteredMatches() {
 function renderResults() {
 
   const container =
-    document.querySelector("#results-list");
+    document.querySelector(
+      "#results-list"
+    );
+
 
   if (!container) return;
 
@@ -371,86 +551,108 @@ function renderResults() {
     `;
 
     return;
+
   }
 
 
   container.innerHTML =
-    matches.map(match => {
+    matches
+      .map(match => {
 
-      const statusClass =
-        match.live
-          ? "live-status"
-          : "match-status";
-
-
-      const statusText =
-        match.live
-          ? "LIVE"
-          : (
-              match.status ||
-              "Scheduled"
-            );
+        const statusClass =
+          match.live
+            ? "live-status"
+            : "match-status";
 
 
-      return `
-        <div class="match">
+        const statusText =
+          match.live
+            ? "LIVE"
+            : (
+                match.status ||
+                "Scheduled"
+              );
 
-          <div>
 
-            <b>
+        return `
+          <div class="match">
+
+            <div>
+
+              <b>
+                ${escapeHTML(
+                  countryFlag(
+                    match.country1
+                  )
+                )}
+                ${escapeHTML(
+                  match.player1
+                )}
+              </b>
+
+              <b>
+                ${escapeHTML(
+                  countryFlag(
+                    match.country2
+                  )
+                )}
+                ${escapeHTML(
+                  match.player2
+                )}
+              </b>
+
+              ${
+                match.tournament
+                  ? `
+                    <span class="tournament-name">
+                      ${escapeHTML(
+                        match.tournament
+                      )}
+                    </span>
+                  `
+                  : ""
+              }
+
+            </div>
+
+
+            <div class="scores">
+
+              <b>
+                ${escapeHTML(
+                  formatScore(
+                    match.score,
+                    0
+                  )
+                )}
+              </b>
+
+              <b>
+                ${escapeHTML(
+                  formatScore(
+                    match.score,
+                    1
+                  )
+                )}
+              </b>
+
+            </div>
+
+
+            <small
+              class="${statusClass}"
+            >
               ${escapeHTML(
-                countryFlag(match.country1)
+                statusText
               )}
-              ${escapeHTML(match.player1)}
-            </b>
-
-            <b>
-              ${escapeHTML(
-                countryFlag(match.country2)
-              )}
-              ${escapeHTML(match.player2)}
-            </b>
-
-            ${
-              match.tournament
-                ? `
-                  <span class="tournament-name">
-                    ${escapeHTML(
-                      match.tournament
-                    )}
-                  </span>
-                `
-                : ""
-            }
+            </small>
 
           </div>
+        `;
 
+      })
+      .join("");
 
-          <div class="scores">
-
-            <b>
-              ${escapeHTML(
-                formatScore(match.score, 0)
-              )}
-            </b>
-
-            <b>
-              ${escapeHTML(
-                formatScore(match.score, 1)
-              )}
-            </b>
-
-          </div>
-
-
-          <small class="${statusClass}">
-            ${escapeHTML(statusText)}
-          </small>
-
-        </div>
-      `;
-
-    }).join("");
 }
 
 
@@ -461,7 +663,10 @@ function renderResults() {
 function updateResultsDate() {
 
   const date =
-    document.querySelector(".api-date");
+    document.querySelector(
+      ".api-date"
+    );
+
 
   if (!date) return;
 
@@ -476,17 +681,31 @@ function updateResultsDate() {
 
   date.textContent =
     `▣ ${formatDate(value)}`;
+
 }
 
 
 function formatDate(value) {
 
+  if (!value) {
+    return "";
+  }
+
+
   const date =
-    new Date(`${value}T12:00:00`);
+    new Date(
+      `${value}T12:00:00`
+    );
 
 
-  if (Number.isNaN(date.getTime())) {
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
+
     return value;
+
   }
 
 
@@ -498,6 +717,7 @@ function formatDate(value) {
       year: "numeric"
     }
   );
+
 }
 
 
@@ -505,7 +725,10 @@ function formatDate(value) {
    SCORE FORMAT
    ===================================================== */
 
-function formatScore(score, playerIndex) {
+function formatScore(
+  score,
+  playerIndex
+) {
 
   if (!score) {
     return "—";
@@ -513,7 +736,9 @@ function formatScore(score, playerIndex) {
 
 
   if (Array.isArray(score)) {
+
     return score.join("  ");
+
   }
 
 
@@ -526,11 +751,17 @@ function formatScore(score, playerIndex) {
     const rows =
       text.split("|");
 
-    return rows[playerIndex] || "—";
+
+    return (
+      rows[playerIndex] ||
+      "—"
+    );
+
   }
 
 
   return text;
+
 }
 
 
@@ -555,27 +786,43 @@ function countryFlag(country) {
     CZE: "🇨🇿",
     CAN: "🇨🇦",
     JPN: "🇯🇵",
-    CHN: "🇨🇳"
+    CHN: "🇨🇳",
+    ARG: "🇦🇷",
+    BRA: "🇧🇷",
+    CRO: "🇭🇷",
+    BEL: "🇧🇪",
+    NED: "🇳🇱",
+    GRE: "🇬🇷",
+    NOR: "🇳🇴",
+    DEN: "🇩🇰",
+    SUI: "🇨🇭",
+    AUT: "🇦🇹",
+    UKR: "🇺🇦"
 
   };
 
 
   return (
     map[
-      String(country).toUpperCase()
+      String(country)
+        .toUpperCase()
     ] || ""
   );
+
 }
 
 
 /* =====================================================
-   NEWS
+   BBC NEWS
    ===================================================== */
 
 async function loadNews() {
 
   const container =
-    document.querySelector("#news-list");
+    document.querySelector(
+      "#news-list"
+    );
+
 
   if (!container) return;
 
@@ -583,15 +830,21 @@ async function loadNews() {
   try {
 
     newsData =
-      await fetchJSON("/api/news");
+      await fetchJSON(
+        "/api/news"
+      );
 
 
     const items =
       Array.isArray(newsData)
         ? newsData
-        : Array.isArray(newsData?.news)
+        : Array.isArray(
+            newsData?.news
+          )
           ? newsData.news
-          : Array.isArray(newsData?.items)
+          : Array.isArray(
+              newsData?.items
+            )
             ? newsData.items
             : [];
 
@@ -605,74 +858,98 @@ async function loadNews() {
       `;
 
       return;
+
     }
 
 
     container.innerHTML =
-      items.slice(0, 5)
-      .map((item, index) => {
+      items
+        .slice(0, 6)
+        .map((item, index) => {
 
-        const title =
-          item.title ||
-          item.name ||
-          "Tennis news";
-
-
-        const date =
-          item.date ||
-          item.pubDate ||
-          item.published ||
-          item.time ||
-          "";
+          const title =
+            item.title ||
+            "Tennis news";
 
 
-        const image =
-          item.image ||
-          item.thumbnail ||
-          item.urlToImage ||
-          "";
+          const link =
+            item.link ||
+            "#";
 
 
-        const classes =
-          [
-            "player",
-            "court",
-            "crowd"
-          ];
+          const source =
+            item.source ||
+            "BBC Sport";
 
 
-        const imageStyle =
-          image
-            ? `style="background-image:url('${escapeAttribute(image)}')"`
-            : "";
+          const date =
+            item.dateLabel ||
+            item.date ||
+            item.pubDate ||
+            item.published ||
+            "";
 
 
-        return `
-          <article>
+          const image =
+            item.image ||
+            item.thumbnail ||
+            item.urlToImage ||
+            "";
 
-            <div
-              class="news-img ${classes[index % classes.length]}"
-              ${imageStyle}>
-            </div>
 
-            <div>
+          return `
+            <a
+              class="news-card"
+              href="${escapeAttribute(link)}"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
 
-              <b>
-                ${escapeHTML(title)}
-              </b>
+              <div
+                class="news-img"
+                ${
+                  image
+                    ? `style="background-image:url('${escapeAttribute(image)}')"`
+                    : ""
+                }
+              >
 
-              <span>
-                ${escapeHTML(
-                  formatNewsDate(date)
-                )}
-              </span>
+                ${
+                  !image
+                    ? `
+                      <div class="news-image-fallback">
+                        TENNIS
+                      </div>
+                    `
+                    : ""
+                }
 
-            </div>
+              </div>
 
-          </article>
-        `;
 
-      }).join("");
+              <div class="news-info">
+
+                <span class="news-source">
+                  ${escapeHTML(source)}
+                </span>
+
+
+                <b>
+                  ${escapeHTML(title)}
+                </b>
+
+
+                <span class="news-date">
+                  ${escapeHTML(date)}
+                </span>
+
+              </div>
+
+            </a>
+          `;
+
+        })
+        .join("");
 
 
   } catch (error) {
@@ -684,38 +961,13 @@ async function loadNews() {
 
 
     container.innerHTML = `
-      <div class="empty-state">
+      <div class="error-state">
         News are temporarily unavailable.
       </div>
     `;
-  }
-}
 
-
-function formatNewsDate(value) {
-
-  if (!value) {
-    return "Latest";
   }
 
-
-  const date =
-    new Date(value);
-
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-
-  return date.toLocaleDateString(
-    "en-GB",
-    {
-      day: "2-digit",
-      month: "short",
-      year: "numeric"
-    }
-  );
 }
 
 
@@ -726,19 +978,37 @@ function formatNewsDate(value) {
 async function loadCalendar() {
 
   const container =
-    document.querySelector("#calendar-list");
+    document.querySelector(
+      "#calendar-list"
+    );
 
-  if (!container) return;
+
+  /*
+     The new homepage does not currently
+     display the calendar.
+
+     We keep this function so that the
+     calendar can be reintroduced later
+     without breaking the site.
+  */
+
+  if (!container) {
+    return;
+  }
 
 
   try {
 
     calendarData =
-      await fetchJSON("/api/calendar");
+      await fetchJSON(
+        "/api/calendar"
+      );
 
 
     const tournaments =
-      Array.isArray(calendarData)
+      Array.isArray(
+        calendarData
+      )
         ? calendarData
         : Array.isArray(
             calendarData?.tournaments
@@ -760,94 +1030,97 @@ async function loadCalendar() {
       `;
 
       return;
+
     }
 
 
     container.innerHTML =
       tournaments
-      .slice(0, 20)
-      .map(item => {
+        .slice(0, 20)
+        .map(item => {
 
-        const name =
-          item.name ||
-          item.tournamentName ||
-          "Tournament";
-
-
-        const tour =
-          String(
-            item.tour ||
-            item.gender ||
-            ""
-          ).toUpperCase() ||
-          "ATP / WTA";
+          const name =
+            item.name ||
+            item.tournamentName ||
+            "Tournament";
 
 
-        const start =
-          item.start ||
-          item.startDate ||
-          item.date ||
-          "";
+          const tour =
+            String(
+              item.tour ||
+              item.gender ||
+              ""
+            ).toUpperCase() ||
+            "ATP / WTA";
 
 
-        const end =
-          item.end ||
-          item.endDate ||
-          "";
+          const start =
+            item.start ||
+            item.startDate ||
+            item.date ||
+            "";
 
 
-        const location =
-          item.country ||
-          item.location ||
-          "";
+          const end =
+            item.end ||
+            item.endDate ||
+            "";
 
 
-        return `
-          <article class="calendar-item">
-
-            <div class="calendar-date">
-              ${escapeHTML(
-                formatCalendarDate(
-                  start,
-                  end
-                )
-              )}
-            </div>
+          const location =
+            item.country ||
+            item.location ||
+            "";
 
 
-            <div>
+          return `
+            <article
+              class="calendar-item"
+            >
 
-              <div class="calendar-name">
-                ${escapeHTML(name)}
+              <div
+                class="calendar-date"
+              >
+                ${escapeHTML(
+                  formatCalendarDate(
+                    start,
+                    end
+                  )
+                )}
               </div>
 
-              <div class="calendar-meta">
 
-                ${escapeHTML(tour)}
+              <div>
 
-                ${
-                  location
-                    ? ` · ${escapeHTML(location)}`
-                    : ""
-                }
+                <div
+                  class="calendar-name"
+                >
+                  ${escapeHTML(name)}
+                </div>
+
+                <div
+                  class="calendar-meta"
+                >
+
+                  ${escapeHTML(tour)}
+
+                  ${
+                    location
+                      ? ` · ${escapeHTML(
+                          location
+                        )}`
+                      : ""
+                  }
+
+                </div>
 
               </div>
 
-            </div>
+            </article>
+          `;
 
-
-            <div class="calendar-tour">
-              ${escapeHTML(
-                item.tier ||
-                item.rank ||
-                ""
-              )}
-            </div>
-
-          </article>
-        `;
-
-      }).join("");
+        })
+        .join("");
 
 
   } catch (error) {
@@ -857,13 +1130,8 @@ async function loadCalendar() {
       error
     );
 
-
-    container.innerHTML = `
-      <div class="empty-state">
-        Tournament calendar is temporarily unavailable.
-      </div>
-    `;
   }
+
 }
 
 
@@ -881,8 +1149,14 @@ function formatCalendarDate(
     new Date(start);
 
 
-  if (Number.isNaN(a.getTime())) {
+  if (
+    Number.isNaN(
+      a.getTime()
+    )
+  ) {
+
     return String(start);
+
   }
 
 
@@ -905,8 +1179,14 @@ function formatCalendarDate(
     new Date(end);
 
 
-  if (Number.isNaN(b.getTime())) {
+  if (
+    Number.isNaN(
+      b.getTime()
+    )
+  ) {
+
     return startText;
+
   }
 
 
@@ -921,169 +1201,7 @@ function formatCalendarDate(
 
 
   return `${startText} – ${endText}`;
-}
 
-
-/* =====================================================
-   RANKINGS
-   ===================================================== */
-
-async function loadRankings() {
-
-  const atp =
-    document.querySelector(
-      "#atp-ranking-list"
-    );
-
-  const wta =
-    document.querySelector(
-      "#wta-ranking-list"
-    );
-
-
-  try {
-
-    const data =
-      await fetchJSON(
-        "/api/rankings"
-      );
-
-
-    const atpItems =
-      Array.isArray(data?.atp)
-        ? data.atp
-        : Array.isArray(data?.ATP)
-          ? data.ATP
-          : [];
-
-
-    const wtaItems =
-      Array.isArray(data?.wta)
-        ? data.wta
-        : Array.isArray(data?.WTA)
-          ? data.WTA
-          : [];
-
-
-    renderRankingList(
-      atp,
-      atpItems
-    );
-
-    renderRankingList(
-      wta,
-      wtaItems
-    );
-
-
-  } catch (error) {
-
-    console.log(
-      "Rankings endpoint not available yet."
-    );
-
-
-    if (atp) {
-
-      atp.innerHTML = `
-        <div class="empty-state">
-          Rankings will appear here when
-          the daily data feed is available.
-        </div>
-      `;
-    }
-
-
-    if (wta) {
-
-      wta.innerHTML = `
-        <div class="empty-state">
-          Rankings will appear here when
-          the daily data feed is available.
-        </div>
-      `;
-    }
-  }
-}
-
-
-function renderRankingList(
-  container,
-  items
-) {
-
-  if (!container) return;
-
-
-  if (!items.length) {
-
-    container.innerHTML = `
-      <div class="empty-state">
-        No ranking data available.
-      </div>
-    `;
-
-    return;
-  }
-
-
-  container.innerHTML =
-    items.slice(0, 5)
-    .map((item, index) => {
-
-      const player =
-        item.name ||
-        item.playerName ||
-        item.fullName ||
-        "Player";
-
-
-      const country =
-        item.countryAcr ||
-        item.country ||
-        item.countryCode ||
-        "";
-
-
-      const points =
-        item.points ||
-        item.rankingPoints ||
-        "";
-
-
-      const rank =
-        item.rank ||
-        item.currentRank ||
-        index + 1;
-
-
-      return `
-        <div class="ranking-row">
-
-          <div class="ranking-number">
-            ${escapeHTML(String(rank))}
-          </div>
-
-          <div>
-
-            <div class="ranking-player">
-              ${escapeHTML(player)}
-            </div>
-
-            <div class="ranking-country">
-              ${escapeHTML(country)}
-            </div>
-
-          </div>
-
-          <div class="ranking-points">
-            ${escapeHTML(String(points))}
-          </div>
-
-        </div>
-      `;
-
-    }).join("");
 }
 
 
@@ -1093,20 +1211,53 @@ function renderRankingList(
 
 function escapeHTML(value) {
 
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+  return String(
+    value ?? ""
+  )
+    .replaceAll(
+      "&",
+      "&amp;"
+    )
+    .replaceAll(
+      "<",
+      "&lt;"
+    )
+    .replaceAll(
+      ">",
+      "&gt;"
+    )
+    .replaceAll(
+      '"',
+      "&quot;"
+    )
+    .replaceAll(
+      "'",
+      "&#039;"
+    );
+
 }
 
 
 function escapeAttribute(value) {
 
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+  return String(
+    value ?? ""
+  )
+    .replaceAll(
+      "&",
+      "&amp;"
+    )
+    .replaceAll(
+      '"',
+      "&quot;"
+    )
+    .replaceAll(
+      "<",
+      "&lt;"
+    )
+    .replaceAll(
+      ">",
+      "&gt;"
+    );
+
 }
