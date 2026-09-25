@@ -816,38 +816,30 @@ function countryFlag(country) {
    BBC NEWS
    ===================================================== */
 
+/* =====================================================
+   BBC NEWS
+   ===================================================== */
+
 async function loadNews() {
 
   const container =
-    document.querySelector(
-      "#news-list"
-    );
-
+    document.querySelector("#news-list");
 
   if (!container) return;
-
 
   try {
 
     newsData =
-      await fetchJSON(
-        "/api/news"
-      );
-
+      await fetchJSON("/api/news");
 
     const items =
       Array.isArray(newsData)
         ? newsData
-        : Array.isArray(
-            newsData?.news
-          )
+        : Array.isArray(newsData?.news)
           ? newsData.news
-          : Array.isArray(
-              newsData?.items
-            )
+          : Array.isArray(newsData?.items)
             ? newsData.items
             : [];
-
 
     if (!items.length) {
 
@@ -858,44 +850,39 @@ async function loadNews() {
       `;
 
       return;
-
     }
-
 
     container.innerHTML =
       items
         .slice(0, 6)
-        .map((item, index) => {
+        .map(item => {
 
           const title =
             item.title ||
             "Tennis news";
 
-
           const link =
             item.link ||
             "#";
-
 
           const source =
             item.source ||
             "BBC Sport";
 
-
           const date =
             item.dateLabel ||
             item.date ||
             item.pubDate ||
-            item.published ||
             "";
-
 
           const image =
             item.image ||
-            item.thumbnail ||
-            item.urlToImage ||
             "";
 
+          const summary =
+            item.summary ||
+            item.description ||
+            "";
 
           return `
             <a
@@ -913,7 +900,6 @@ async function loadNews() {
                     : ""
                 }
               >
-
                 ${
                   !image
                     ? `
@@ -923,24 +909,41 @@ async function loadNews() {
                     `
                     : ""
                 }
-
               </div>
 
 
               <div class="news-info">
 
-                <span class="news-source">
-                  ${escapeHTML(source)}
-                </span>
+                <div class="news-meta">
+
+                  <span class="news-source">
+                    ${escapeHTML(source)}
+                  </span>
+
+                  <span class="news-date">
+                    ${escapeHTML(date)}
+                  </span>
+
+                </div>
 
 
-                <b>
+                <h3>
                   ${escapeHTML(title)}
-                </b>
+                </h3>
 
 
-                <span class="news-date">
-                  ${escapeHTML(date)}
+                ${
+                  summary
+                    ? `
+                      <p>
+                        ${escapeHTML(summary)}
+                      </p>
+                    `
+                    : ""
+                }
+
+                <span class="read-more">
+                  Read article →
                 </span>
 
               </div>
@@ -951,14 +954,12 @@ async function loadNews() {
         })
         .join("");
 
-
   } catch (error) {
 
     console.error(
       "YepTennis news:",
       error
     );
-
 
     container.innerHTML = `
       <div class="error-state">
@@ -969,8 +970,6 @@ async function loadNews() {
   }
 
 }
-
-
 /* =====================================================
    TOURNAMENT CALENDAR
    ===================================================== */
