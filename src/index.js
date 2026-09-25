@@ -1174,7 +1174,15 @@ export default {
 
 
     try {
+if (
+  url.pathname ===
+  "/api/debug-upcoming"
+) {
 
+  return J(
+    await debugUpcoming(env)
+  );
+}
       if (
         url.pathname ===
         "/api/today"
