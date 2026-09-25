@@ -958,112 +958,166 @@ async function calendar(env) {
    RSS
 ========================================================= */
 
-function xml(
-  xmlText,
-  source
-) {
 
-  return [
-    ...xmlText.matchAll(
-      /<item\b[\s\S]*?<\/item>/gi
-    )
-  ]
+function xml(xml, source) {
 
-    .map(
-      x => x[0]
-    )
+  return [...xml.matchAll(
+    /<item\b[\s\S]*?<\/item>/gi
+  )]
+  .map(m => m[0])
+  .map(item => {
 
-    .map(
-      item => {
-
-        const clean =
-          value =>
-            value
-              .replace(
-                /<!\[CDATA\[([\s\S]*?)\]\]>/g,
-                "$1"
-              )
-              .replace(
-                /<[^>]+>/g,
-                ""
-              )
-              .replace(
-                /&amp;/g,
-                "&"
-              )
-              .replace(
-                /&quot;/g,
-                '"'
-              )
-              .trim();
+    const clean = value =>
+      String(value || "")
+        .replace(
+          /<!\[CDATA\[([\s\S]*?)\]\]>/g,
+          "$1"
+        )
+        .replace(/<[^>]+>/g, "")
+        .replace(/&amp;/g, "&")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&apos;/g, "'")
+        .trim();
 
 
-        const get =
-          tag => {
+    const getTag = tag => {
 
-            const found =
-              item.match(
-                new RegExp(
-                  `<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`,
-                  "i"
-                )
-              );
+      const match = item.match(
+        new RegExp(
+          `<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`,
+          "i"
+        )
+      );
 
-            return found
-              ? clean(
-                  found[1]
-                )
-              : "";
-          };
+      return match
+        ? clean(match[1])
+        : "";
+    };
 
 
-        const link =
-          (
-            item.match(
-              /<link>([\s\S]*?)<\/link>/i
-            ) ||
-            []
-          )[1] || "";
+    const getAttribute = (
+      tag,
+      attribute
+    ) => {
+
+      const match = item.match(
+        new RegExp(
+          `<${tag}\\b[^>]*\\b${attribute}=["']([^"']+)["']`,
+          "i"
+        )
+      );
+
+      return match
+        ? clean(match[1])
+        : "";
+    };
 
 
-        const date =
-          get("pubDate") ||
-          get("published");
+    const title =
+      getTag("title");
 
 
-        return {
+    const linkMatch =
+      item.match(
+        /<link>([\s\S]*?)<\/link>/i
+      );
 
-          title:
-            get("title"),
 
-          link:
-            clean(link),
+    const link =
+      linkMatch
+        ? clean(linkMatch[1])
+        : "";
 
-          source,
 
-          dateLabel:
-            date
-              ? new Date(
-                  date
-                ).toLocaleDateString(
-                  "en-GB",
-                  {
-                    day:
-                      "numeric",
-                    month:
-                      "short"
-                  }
-                )
-              : ""
-        };
+    /*
+      BBC RSS normally provides the
+      article image through media:thumbnail
+      or media:content.
+    */
+
+    let image =
+      getAttribute(
+        "media:thumbnail",
+        "url"
+      );
+
+
+    if (!image) {
+
+      image =
+        getAttribute(
+          "media:content",
+          "url"
+        );
+    }
+
+
+    if (!image) {
+
+      image =
+        getAttribute(
+          "enclosure",
+          "url"
+        );
+    }
+
+
+    if (!image) {
+
+      image =
+        getAttribute(
+          "image",
+          "url"
+        );
+    }
+
+
+    const date =
+      getTag("pubDate") ||
+      getTag("published") ||
+      getTag("updated");
+
+
+    let dateLabel = "";
+
+
+    if (date) {
+
+      const parsed =
+        new Date(date);
+
+
+      if (!Number.isNaN(
+        parsed.getTime()
+      )) {
+
+        dateLabel =
+          parsed.toLocaleDateString(
+            "en-GB",
+            {
+              day: "numeric",
+              month: "short"
+            }
+          );
       }
-    )
+    }
 
-    .filter(
-      x =>
-        x.title &&
-        x.link
-    );
+
+    return {
+      title,
+      link,
+      image,
+      source,
+      dateLabel
+    };
+
+  })
+  .filter(
+    item =>
+      item.title &&
+      item.link
+  );
 }
 
 
