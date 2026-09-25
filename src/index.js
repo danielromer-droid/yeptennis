@@ -1135,7 +1135,27 @@ async function news() {
   };
 }
 
+/* =========================================================
+   TEMPORARY DEBUG - UPCOMING API
+========================================================= */
 
+async function debugUpcoming(env) {
+
+  const atp = await call(
+    "/tennis/v2/extend/api/events/upcoming/atp?page=1",
+    env
+  );
+
+  const wta = await call(
+    "/tennis/v2/extend/api/events/upcoming/wta?page=1",
+    env
+  );
+
+  return {
+    atp,
+    wta
+  };
+}
 /* =========================================================
    WORKER
 ========================================================= */
