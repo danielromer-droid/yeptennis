@@ -6,10 +6,7 @@ const BASE = `https://${HOST}`;
    JSON RESPONSE
 ========================================================= */
 
-const J = (
-  data,
-  status = 200
-) =>
+const J = (data, status = 200) =>
   new Response(
     JSON.stringify(data),
     {
@@ -25,13 +22,10 @@ const J = (
 
 
 /* =========================================================
-   RAPIDAPI CALL
+   API CALL
 ========================================================= */
 
-async function call(
-  path,
-  env
-) {
+async function call(path, env) {
 
   if (!env.TENNIS_API_KEY) {
     throw new Error(
@@ -39,45 +33,37 @@ async function call(
     );
   }
 
+  const response = await fetch(
+    BASE + path,
+    {
+      headers: {
+        "X-RapidAPI-Key":
+          env.TENNIS_API_KEY,
 
-  const response =
-    await fetch(
-      BASE + path,
-      {
-        headers: {
-          "X-RapidAPI-Key":
-            env.TENNIS_API_KEY,
-
-          "X-RapidAPI-Host":
-            HOST
-        }
+        "X-RapidAPI-Host":
+          HOST
       }
-    );
-
+    }
+  );
 
   const text =
     await response.text();
 
-
   let data;
 
   try {
-    data =
-      JSON.parse(text);
+    data = JSON.parse(text);
   } catch {
     data = {};
   }
 
-
   if (!response.ok) {
-
     throw new Error(
       data.message ||
       data.error ||
       `Tennis API HTTP ${response.status}`
     );
   }
-
 
   return data;
 }
@@ -87,68 +73,51 @@ async function call(
    ARRAY HELPER
 ========================================================= */
 
-const arr = data => {
+function arr(data) {
 
   if (Array.isArray(data)) {
     return data;
   }
 
-  if (
-    Array.isArray(
-      data?.data
-    )
-  ) {
+  if (Array.isArray(data?.data)) {
     return data.data;
   }
 
-  if (
-    Array.isArray(
-      data?.results
-    )
-  ) {
+  if (Array.isArray(data?.results)) {
     return data.results;
   }
 
-  if (
-    Array.isArray(
-      data?.result
-    )
-  ) {
+  if (Array.isArray(data?.result)) {
     return data.result;
   }
 
   return [];
-};
+}
 
 
 /* =========================================================
    VALUE HELPER
 ========================================================= */
 
-const val = (
+function val(
   object,
   keys,
   fallback = ""
-) => {
+) {
 
-  for (
-    const key of keys
-  ) {
+  for (const key of keys) {
 
     if (
-      object?.[key] !==
-        null &&
-      object?.[key] !==
-        undefined &&
+      object?.[key] !== null &&
+      object?.[key] !== undefined &&
       object?.[key] !== ""
     ) {
-
       return object[key];
     }
   }
 
   return fallback;
-};
+}
 
 
 /* =========================================================
@@ -157,12 +126,10 @@ const val = (
 
 function player(p) {
 
-  if (
-    typeof p ===
-    "string"
-  ) {
+  if (typeof p === "string") {
 
     return {
+      id: null,
       name: p,
       country: "",
       rank: "",
@@ -170,13 +137,15 @@ function player(p) {
     };
   }
 
-
   return {
 
     id:
       val(
         p,
-        ["id", "playerId"],
+        [
+          "id",
+          "playerId"
+        ],
         null
       ),
 
@@ -227,22 +196,20 @@ function player(p) {
    MATCH NORMALISATION
 ========================================================= */
 
-function match(
-  x,
-  tour
-) {
+function match(x, tour) {
 
   const a =
     player(
       x.player1 ||
-      x.home
+      x.home ||
+      x.player1Name
     );
-
 
   const b =
     player(
       x.player2 ||
-      x.away
+      x.away ||
+      x.player2Name
     );
 
 
@@ -258,8 +225,7 @@ function match(
 
 
   if (
-    typeof score ===
-    "object"
+    typeof score === "object"
   ) {
 
     score =
@@ -306,12 +272,6 @@ function match(
     "";
 
 
-  const end =
-    x.endTime ||
-    x.endDate ||
-    "";
-
-
   return {
 
     id:
@@ -349,18 +309,14 @@ function match(
     rank2:
       b.rank,
 
-    points1:
-      a.points,
-
-    points2:
-      b.points,
-
     seed1:
       x.seed1 ||
+      x.player1Seed ||
       "",
 
     seed2:
       x.seed2 ||
+      x.player2Seed ||
       "",
 
     score:
@@ -390,61 +346,17 @@ function match(
 
     start,
 
-    end
+    end:
+      x.endTime ||
+      x.endDate ||
+      ""
   };
 }
 
 
 /* =========================================================
-   DATE HELPERS
+   PARIS DATE
 ========================================================= */
-
-/*
- * Returns YYYY-MM-DD.
- */
-
-function isoDate(
-  date
-) {
-
-  return date
-    .toISOString()
-    .slice(
-      0,
-      10
-    );
-}
-
-
-/*
- * Add/subtract UTC days.
- */
-
-function addDays(
-  date,
-  amount
-) {
-
-  const d =
-    new Date(date);
-
-  d.setUTCDate(
-    d.getUTCDate() +
-      amount
-  );
-
-  return d;
-}
-
-
-/*
- * Today's date in France.
- *
- * This is important because the
- * API uses UTC timestamps while
- * the website is being viewed
- * from France.
- */
 
 function parisDate(
   date = new Date()
@@ -471,32 +383,28 @@ function parisDate(
 
   const values = {};
 
-
-  for (
-    const part of parts
-  ) {
+  for (const part of parts) {
 
     if (
       part.type !==
       "literal"
     ) {
-
       values[
         part.type
-      ] =
-        part.value;
+      ] = part.value;
     }
   }
 
 
-  return `${values.year}-${values.month}-${values.day}`;
+  return (
+    `${values.year}-${values.month}-${values.day}`
+  );
 }
 
 
-/*
- * Convert a timestamp into
- * a Paris calendar date.
- */
+/* =========================================================
+   TIMESTAMP → PARIS DATE
+========================================================= */
 
 function timestampParisDate(
   value
@@ -507,26 +415,27 @@ function timestampParisDate(
   }
 
 
-  const d =
+  const date =
     new Date(value);
 
 
   if (
     Number.isNaN(
-      d.getTime()
+      date.getTime()
     )
   ) {
-
     return "";
   }
 
 
-  return parisDate(d);
+  return parisDate(
+    date
+  );
 }
 
 
 /* =========================================================
-   FETCH FIXTURES FOR ONE DATE
+   FIXTURES
 ========================================================= */
 
 async function fixturesForDate(
@@ -535,52 +444,77 @@ async function fixturesForDate(
   env
 ) {
 
-  const path =
-    `/tennis/v2/${tour}/fixtures/${date}` +
-    `?include=round,tournament` +
-    `&pageNo=1` +
-    `&pageSize=100` +
-    `&filter=PlayerGroup:singles`;
-
-
   try {
 
     const data =
       await call(
-        path,
+        `/tennis/v2/${tour}/fixtures/${date}?include=round,tournament&pageNo=1&pageSize=100&filter=PlayerGroup:singles`,
         env
       );
 
 
-    return {
-      ok: true,
-      date,
-      matches:
-        arr(data)
-          .map(
-            item =>
-              match(
-                item,
-                tour
-              )
+    return arr(data)
+      .map(
+        item =>
+          match(
+            item,
+            tour
           )
-    };
+      );
 
   } catch (error) {
 
-    return {
-      ok: false,
-      date,
-      matches: [],
-      error:
-        error.message
-    };
+    console.error(
+      `Fixtures ${tour} ${date}:`,
+      error.message
+    );
+
+    return [];
   }
 }
 
 
 /* =========================================================
-   LIVE EVENTS
+   UPCOMING MATCHES
+========================================================= */
+
+async function upcoming(
+  tour,
+  env
+) {
+
+  try {
+
+    const data =
+      await call(
+        `/tennis/v2/extend/api/events/upcoming/${tour}`,
+        env
+      );
+
+
+    return arr(data)
+      .map(
+        item =>
+          match(
+            item,
+            tour
+          )
+      );
+
+  } catch (error) {
+
+    console.error(
+      `Upcoming ${tour}:`,
+      error.message
+    );
+
+    return [];
+  }
+}
+
+
+/* =========================================================
+   LIVE
 ========================================================= */
 
 async function liveEvents(
@@ -595,11 +529,9 @@ async function liveEvents(
         env
       );
 
-
     return arr(data);
 
   } catch {
-
     return [];
   }
 }
@@ -609,194 +541,152 @@ async function liveEvents(
    TODAY
 ========================================================= */
 
-async function today(
-  env
-) {
-
-  /*
-   * Use the date in France,
-   * not simply UTC.
-   */
+async function today(env) {
 
   const targetDate =
     parisDate();
 
 
   /*
-   * Current UTC date.
+   * Get:
+   *
+   * 1. Fixtures for today
+   * 2. Upcoming ATP
+   * 3. Upcoming WTA
+   * 4. Live matches
    */
 
-  const now =
-    new Date();
-
-
-  const currentUTC =
-    isoDate(now);
-
-
-  /*
-   * Previous UTC date.
-   *
-   * This catches matches such as:
-   *
-   * 23:30 UTC on 24 September
-   *
-   * which is 01:30 on
-   * 25 September in France.
-   */
-
-  const previousUTC =
-    isoDate(
-      addDays(
-        now,
-        -1
-      )
-    );
-
-
-  /*
-   * First try today's UTC date.
-   *
-   * Only if necessary do we also
-   * check the previous UTC date.
-   */
-
-  const currentResults =
+  const [
+    atpFixtures,
+    wtaFixtures,
+    atpUpcoming,
+    wtaUpcoming,
+    live
+  ] =
     await Promise.all([
       fixturesForDate(
-        currentUTC,
+        targetDate,
         "atp",
         env
       ),
 
       fixturesForDate(
-        currentUTC,
+        targetDate,
         "wta",
+        env
+      ),
+
+      upcoming(
+        "atp",
+        env
+      ),
+
+      upcoming(
+        "wta",
+        env
+      ),
+
+      liveEvents(
         env
       )
     ]);
 
 
-  let allResults =
+  /*
+   * Fixtures contain completed
+   * and possibly scheduled matches.
+   */
+
+  const fixtureMatches =
     [
-      ...currentResults[0].matches,
-      ...currentResults[1].matches
+      ...atpFixtures,
+      ...wtaFixtures
     ];
 
 
   /*
-   * If the current UTC date gives
-   * no matches, check the previous
-   * UTC date.
+   * Upcoming contains future
+   * scheduled matches.
    *
-   * This avoids making extra API
-   * calls every time while still
-   * handling the midnight timezone
-   * problem.
+   * Keep only those belonging
+   * to today's date in France.
    */
 
-  if (
-    allResults.length ===
-    0
-  ) {
-
-    const previousResults =
-      await Promise.all([
-        fixturesForDate(
-          previousUTC,
-          "atp",
-          env
-        ),
-
-        fixturesForDate(
-          previousUTC,
-          "wta",
-          env
-        )
-      ]);
-
-
-    allResults =
-      [
-        ...previousResults[0].matches,
-        ...previousResults[1].matches
-      ];
-  }
-
-
-  /*
-   * Keep only matches which
-   * actually belong to today's
-   * date in France.
-   *
-   * If the API does not provide
-   * a usable timestamp, keep it
-   * rather than losing the match.
-   */
-
-  let matches =
-    allResults.filter(
+  const upcomingMatches =
+    [
+      ...atpUpcoming,
+      ...wtaUpcoming
+    ].filter(
       item => {
 
-        if (!item.start) {
-          return true;
-        }
-
-
-        const localDate =
+        const date =
           timestampParisDate(
             item.start
           );
 
-
         return (
-          !localDate ||
-          localDate ===
-            targetDate
+          !date ||
+          date === targetDate
         );
       }
     );
 
 
   /*
-   * If the timestamp filtering
-   * removed everything, return the
-   * API results rather than falsely
-   * reporting zero matches.
+   * Combine them.
    */
 
-  if (
-    matches.length ===
-      0 &&
-    allResults.length >
-      0
-  ) {
-
-    matches =
-      allResults;
-  }
+  let matches = [
+    ...fixtureMatches,
+    ...upcomingMatches
+  ];
 
 
   /*
-   * Get live events.
+   * Remove duplicates.
    */
 
-  const live =
-    await liveEvents(
-      env
+  const unique =
+    new Map();
+
+
+  for (const item of matches) {
+
+    const key =
+      item.id
+        ? String(item.id)
+        : [
+            item.tour,
+            item.player1,
+            item.player2,
+            item.start
+          ].join("|");
+
+
+    if (!unique.has(key)) {
+      unique.set(
+        key,
+        item
+      );
+    }
+  }
+
+
+  matches =
+    Array.from(
+      unique.values()
     );
 
 
   /*
-   * Merge live status and score
-   * into the fixture data.
+   * Merge live information.
    */
 
   for (
     const liveMatch of live
   ) {
 
-    const livePlayer1 =
+    const p1 =
       val(
         liveMatch,
         [
@@ -805,8 +695,7 @@ async function today(
         ]
       );
 
-
-    const livePlayer2 =
+    const p2 =
       val(
         liveMatch,
         [
@@ -817,8 +706,8 @@ async function today(
 
 
     if (
-      !livePlayer1 ||
-      !livePlayer2
+      !p1 ||
+      !p2
     ) {
       continue;
     }
@@ -826,27 +715,15 @@ async function today(
 
     const found =
       matches.find(
-        item => {
-
-          const sameOrder =
-            item.player1 ===
-              livePlayer1 &&
-            item.player2 ===
-              livePlayer2;
-
-
-          const reverseOrder =
-            item.player1 ===
-              livePlayer2 &&
-            item.player2 ===
-              livePlayer1;
-
-
-          return (
-            sameOrder ||
-            reverseOrder
-          );
-        }
+        item =>
+          (
+            item.player1 === p1 &&
+            item.player2 === p2
+          ) ||
+          (
+            item.player1 === p2 &&
+            item.player2 === p1
+          )
       );
 
 
@@ -859,46 +736,45 @@ async function today(
         "Live";
 
 
-      const liveScore =
+      found.score =
         val(
           liveMatch,
           ["score"],
-          ""
+          found.score
         );
-
-
-      if (
-        liveScore
-      ) {
-
-        found.score =
-          liveScore;
-      }
     }
   }
 
 
   /*
-   * Sort by start time.
+   * Sort:
+   *
+   * Live first,
+   * then chronological.
    */
 
   matches.sort(
-    (
-      a,
-      b
-    ) => {
+    (a, b) => {
+
+      if (
+        a.live !==
+        b.live
+      ) {
+        return a.live
+          ? -1
+          : 1;
+      }
+
 
       const da =
         new Date(
-          a.start ||
-          0
+          a.start || 0
         ).getTime();
 
 
       const db =
         new Date(
-          b.start ||
-          0
+          b.start || 0
         ).getTime();
 
 
@@ -917,19 +793,13 @@ async function today(
     count:
       matches.length,
 
-    matches,
-
-    checkedUTC:
-      currentUTC,
-
-    fallbackUTC:
-      previousUTC
+    matches
   };
 }
 
 
 /* =========================================================
-   MASTERS / CALENDAR
+   MASTERS
 ========================================================= */
 
 function masters(
@@ -964,27 +834,6 @@ function masters(
     "";
 
 
-  const start =
-    val(
-      x,
-      [
-        "date",
-        "startDate",
-        "start"
-      ]
-    );
-
-
-  const end =
-    val(
-      x,
-      [
-        "endDate",
-        "end"
-      ]
-    );
-
-
   return {
 
     name,
@@ -995,9 +844,24 @@ function masters(
       tier ||
       rank,
 
-    start,
+    start:
+      val(
+        x,
+        [
+          "date",
+          "startDate",
+          "start"
+        ]
+      ),
 
-    end,
+    end:
+      val(
+        x,
+        [
+          "endDate",
+          "end"
+        ]
+      ),
 
     country:
       x.country?.name ||
@@ -1022,9 +886,7 @@ function masters(
    CALENDAR
 ========================================================= */
 
-async function calendar(
-  env
-) {
+async function calendar(env) {
 
   const year =
     new Date()
@@ -1048,54 +910,52 @@ async function calendar(
     ]);
 
 
-  const tournaments =
-    [
-      ...arr(atp)
-        .map(
-          x =>
-            masters(
-              x,
-              "atp"
-            )
-        ),
+  return {
 
-      ...arr(wta)
-        .map(
+    year,
+
+    tournaments:
+      [
+        ...arr(atp)
+          .map(
+            x =>
+              masters(
+                x,
+                "atp"
+              )
+          ),
+
+        ...arr(wta)
+          .map(
+            x =>
+              masters(
+                x,
+                "wta"
+              )
+          )
+      ]
+
+        .filter(
           x =>
-            masters(
-              x,
-              "wta"
+            x.isMasters &&
+            x.start
+        )
+
+        .sort(
+          (a, b) =>
+            new Date(
+              a.start
+            ) -
+            new Date(
+              b.start
             )
         )
-    ]
-      .filter(
-        x =>
-          x.isMasters &&
-          x.start
-      )
-      .sort(
-        (
-          a,
-          b
-        ) =>
-          new Date(
-            a.start
-          ) -
-          new Date(
-            b.start
-          )
-      );
-
-
-  return {
-    year,
-    tournaments
   };
 }
 
 
 /* =========================================================
-   RSS XML PARSER
+   RSS
 ========================================================= */
 
 function xml(
@@ -1110,8 +970,7 @@ function xml(
   ]
 
     .map(
-      matchItem =>
-        matchItem[0]
+      x => x[0]
     )
 
     .map(
@@ -1142,18 +1001,13 @@ function xml(
         const get =
           tag => {
 
-            const regex =
-              new RegExp(
-                `<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`,
-                "i"
-              );
-
-
             const found =
               item.match(
-                regex
+                new RegExp(
+                  `<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`,
+                  "i"
+                )
               );
-
 
             return found
               ? clean(
@@ -1163,16 +1017,13 @@ function xml(
           };
 
 
-        const linkMatch =
-          item.match(
-            /<link>([\s\S]*?)<\/link>/i
-          );
-
-
         const link =
-          linkMatch
-            ? linkMatch[1]
-            : "";
+          (
+            item.match(
+              /<link>([\s\S]*?)<\/link>/i
+            ) ||
+            []
+          )[1] || "";
 
 
         const date =
@@ -1209,9 +1060,9 @@ function xml(
     )
 
     .filter(
-      item =>
-        item.title &&
-        item.link
+      x =>
+        x.title &&
+        x.link
     );
 }
 
@@ -1222,7 +1073,7 @@ function xml(
 
 async function news() {
 
-  const urls = [
+  const sources = [
 
     [
       "https://feeds.bbci.co.uk/sport/tennis/rss.xml",
@@ -1233,17 +1084,18 @@ async function news() {
       "https://www.atptour.com/en/media/rss-feed/xml-feed",
       "ATP Tour"
     ]
+
   ];
 
 
-  const out = [];
+  const items = [];
 
 
   for (
     const [
       url,
       source
-    ] of urls
+    ] of sources
   ) {
 
     try {
@@ -1264,7 +1116,7 @@ async function news() {
         response.ok
       ) {
 
-        out.push(
+        items.push(
           ...xml(
             await response.text(),
             source
@@ -1273,16 +1125,13 @@ async function news() {
       }
 
     } catch {
-      /*
-       * Ignore one news source
-       * if it is temporarily unavailable.
-       */
+      // Ignore failed news source.
     }
   }
 
 
   return {
-    items: out
+    items
   };
 }
 
@@ -1306,10 +1155,6 @@ export default {
 
     try {
 
-      /*
-       * TODAY
-       */
-
       if (
         url.pathname ===
         "/api/today"
@@ -1323,10 +1168,6 @@ export default {
       }
 
 
-      /*
-       * CALENDAR
-       */
-
       if (
         url.pathname ===
         "/api/calendar"
@@ -1339,10 +1180,6 @@ export default {
         );
       }
 
-
-      /*
-       * RANKINGS
-       */
 
       if (
         url.pathname ===
@@ -1392,10 +1229,6 @@ export default {
       }
 
 
-      /*
-       * NEWS
-       */
-
       if (
         url.pathname ===
         "/api/news"
@@ -1406,10 +1239,6 @@ export default {
         );
       }
 
-
-      /*
-       * UNKNOWN API
-       */
 
       if (
         url.pathname.startsWith(
@@ -1426,10 +1255,6 @@ export default {
         );
       }
 
-
-      /*
-       * WEBSITE ASSETS
-       */
 
       return env.ASSETS.fetch(
         req
