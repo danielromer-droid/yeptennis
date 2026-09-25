@@ -1,13 +1,12 @@
 /* =========================================================
    YepTennis - Homepage App
-   Connects the existing homepage to the live API
 ========================================================= */
 
 let todayData = null;
 let calendarData = null;
 let newsData = null;
 
-let resultsFilter = "atp";
+let resultsFilter = "all";
 
 
 /* =========================================================
@@ -26,11 +25,8 @@ function escapeHTML(value) {
 
 async function getJSON(url) {
 
-  const separator =
-    url.includes("?") ? "&" : "?";
-
   const response = await fetch(
-    `${url}${separator}_=${Date.now()}`,
+    `${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}`,
     {
       cache: "no-store",
       headers: {
@@ -55,9 +51,7 @@ async function getJSON(url) {
 
 function validDate(value) {
 
-  if (!value) {
-    return null;
-  }
+  if (!value) return null;
 
   const d = new Date(value);
 
@@ -71,9 +65,7 @@ function formatDate(value) {
 
   const d = validDate(value);
 
-  if (!d) {
-    return "";
-  }
+  if (!d) return "";
 
   return d.toLocaleDateString(
     "en-GB",
@@ -90,9 +82,7 @@ function formatShortDate(value) {
 
   const d = validDate(value);
 
-  if (!d) {
-    return "";
-  }
+  if (!d) return "";
 
   return d.toLocaleDateString(
     "en-GB",
@@ -108,9 +98,7 @@ function formatTime(value) {
 
   const d = validDate(value);
 
-  if (!d) {
-    return "";
-  }
+  if (!d) return "";
 
   return d.toLocaleTimeString(
     "en-GB",
@@ -123,7 +111,7 @@ function formatTime(value) {
 
 
 /* =========================================================
-   COUNTRY FLAGS
+   COUNTRY FLAG
 ========================================================= */
 
 function countryFlag(code) {
@@ -151,8 +139,55 @@ function countryFlag(code) {
 
 
 /* =========================================================
-   MATCH HELPERS
+   MATCH DATA
 ========================================================= */
+
+function rawMatches() {
+
+  if (!todayData) {
+    return [];
+  }
+
+  /*
+   * Normal API response:
+   *
+   * {
+   *   date: "...",
+   *   matches: [...]
+   * }
+   *
+   * The additional checks make this
+   * tolerant of slightly different
+   * response formats.
+   */
+
+  if (
+    Array.isArray(
+      todayData.matches
+    )
+  ) {
+    return todayData.matches;
+  }
+
+  if (
+    Array.isArray(
+      todayData.events
+    )
+  ) {
+    return todayData.events;
+  }
+
+  if (
+    Array.isArray(
+      todayData.data
+    )
+  ) {
+    return todayData.data;
+  }
+
+  return [];
+}
+
 
 function isSingles(match) {
 
@@ -160,23 +195,28 @@ function isSingles(match) {
     return false;
   }
 
+  const p1 =
+    String(
+      match.player1 ||
+      match.homeTeam ||
+      ""
+    );
+
+  const p2 =
+    String(
+      match.player2 ||
+      match.awayTeam ||
+      ""
+    );
+
   /*
-   * The API represents doubles players
-   * with names containing "/".
+   * Doubles players in the API
+   * contain "/".
    */
 
   if (
-    String(
-      match.player1 || ""
-    ).includes("/")
-  ) {
-    return false;
-  }
-
-  if (
-    String(
-      match.player2 || ""
-    ).includes("/")
+    p1.includes("/") ||
+    p2.includes("/")
   ) {
     return false;
   }
@@ -185,19 +225,15 @@ function isSingles(match) {
 }
 
 
-function getMatches() {
+function matchTour(match) {
 
-  if (
-    !todayData ||
-    !Array.isArray(
-      todayData.matches
-    )
-  ) {
-    return [];
-  }
-
-  return todayData.matches
-    .filter(isSingles);
+  return String(
+    match.tour ||
+    match.league ||
+    ""
+  )
+    .trim()
+    .toLowerCase();
 }
 
 
@@ -207,7 +243,9 @@ function isLive(match) {
     match.live === true ||
     String(
       match.status || ""
-    ).toLowerCase() === "live"
+    )
+      .toLowerCase()
+      .includes("live")
   );
 }
 
@@ -220,71 +258,10 @@ function isCompleted(match) {
     ).toLowerCase();
 
   return (
-    status.includes("complete") ||
     status.includes("finished") ||
-    status.includes("final") ||
-    !!match.score &&
-    !isLive(match) &&
-    status !== "scheduled"
+    status.includes("complete") ||
+    status.includes("final")
   );
-}
-
-
-function matchTime(match) {
-
-  return formatTime(
-    match.start
-  );
-}
-
-
-/* =========================================================
-   SCORE DISPLAY
-========================================================= */
-
-function scoreText(match) {
-
-  if (
-    match.score === null ||
-    match.score === undefined
-  ) {
-    return "";
-  }
-
-  if (
-    typeof match.score ===
-    "string"
-  ) {
-    return match.score;
-  }
-
-  if (
-    Array.isArray(
-      match.score
-    )
-  ) {
-    return match.score.join(" ");
-  }
-
-  if (
-    typeof match.score ===
-    "object"
-  ) {
-
-    if (
-      match.score.display
-    ) {
-      return match.score.display;
-    }
-
-    if (
-      match.score.score
-    ) {
-      return match.score.score;
-    }
-  }
-
-  return "";
 }
 
 
@@ -292,11 +269,22 @@ function scoreText(match) {
    FILTER
 ========================================================= */
 
-function filteredMatches() {
+function getFilteredMatches() {
 
   let matches =
-    getMatches();
+    rawMatches()
+      .filter(
+        isSingles
+      );
 
+
+  /*
+   * IMPORTANT:
+   * Default = ALL.
+   *
+   * This lets us immediately
+   * see the live API feed.
+   */
 
   if (
     resultsFilter ===
@@ -305,10 +293,8 @@ function filteredMatches() {
 
     matches =
       matches.filter(
-        m =>
-          String(
-            m.tour || ""
-          ).toLowerCase() ===
+        match =>
+          matchTour(match) ===
           "atp"
       );
 
@@ -319,10 +305,8 @@ function filteredMatches() {
 
     matches =
       matches.filter(
-        m =>
-          String(
-            m.tour || ""
-          ).toLowerCase() ===
+        match =>
+          matchTour(match) ===
           "wta"
       );
 
@@ -353,69 +337,51 @@ function filteredMatches() {
 
 
 /* =========================================================
-   SORT MATCHES
+   SCORE
 ========================================================= */
 
-function sortMatches(
-  matches
-) {
+function getScore(match) {
 
-  return [...matches]
-    .sort(
-      (a, b) => {
+  if (
+    match.score !== undefined &&
+    match.score !== null &&
+    String(match.score) !== ""
+  ) {
 
-        /*
-         * Live matches first.
-         */
+    if (
+      typeof match.score ===
+      "string"
+    ) {
+      return match.score;
+    }
 
-        if (
-          isLive(a) !==
-          isLive(b)
-        ) {
-          return isLive(a)
-            ? -1
-            : 1;
-        }
+    if (
+      Array.isArray(
+        match.score
+      )
+    ) {
+      return match.score.join(" ");
+    }
 
+    if (
+      typeof match.score ===
+      "object"
+    ) {
 
-        /*
-         * Then chronological.
-         */
+      return (
+        match.score.display ||
+        match.score.score ||
+        ""
+      );
+    }
+  }
 
-        const da =
-          validDate(
-            a.start
-          );
-
-        const db =
-          validDate(
-            b.start
-          );
-
-
-        if (!da && !db) {
-          return 0;
-        }
-
-        if (!da) {
-          return 1;
-        }
-
-        if (!db) {
-          return -1;
-        }
-
-        return (
-          da.getTime() -
-          db.getTime()
-        );
-      }
-    );
+  return "";
 }
 
 
 /* =========================================================
-   CREATE MATCH HTML
+   MATCH HTML
 ========================================================= */
 
 function createMatchHTML(
@@ -431,19 +397,17 @@ function createMatchHTML(
     "Player 2";
 
 
-  const flag1 =
-    countryFlag(
-      match.country1
-    );
+  const country1 =
+    match.country1 ||
+    "";
 
-  const flag2 =
-    countryFlag(
-      match.country2
-    );
+  const country2 =
+    match.country2 ||
+    "";
 
 
   const score =
-    scoreText(
+    getScore(
       match
     );
 
@@ -454,45 +418,37 @@ function createMatchHTML(
     );
 
 
-  let status = "";
+  const completed =
+    isCompleted(
+      match
+    );
+
+
+  let rightSide =
+    "";
 
 
   if (live) {
 
-    status =
+    rightSide =
       `<span class="live-label">● Live</span>`;
 
-  } else if (
-    isCompleted(match)
-  ) {
+  } else if (completed) {
 
-    status =
+    rightSide =
       `<span>Completed</span>`;
 
   } else {
 
-    status =
+    rightSide =
       `<span>${
         escapeHTML(
-          matchTime(match)
+          formatTime(
+            match.start
+          )
         )
       }</span>`;
   }
-
-
-  /*
-   * If score exists, display it.
-   * Otherwise show the scheduled time.
-   */
-
-  const displayScore =
-    score
-      ? escapeHTML(score)
-      : matchTime(match)
-        ? escapeHTML(
-            matchTime(match)
-          )
-        : "—";
 
 
   return `
@@ -501,33 +457,21 @@ function createMatchHTML(
       <div>
 
         <b>
-          ${flag1}
+          ${countryFlag(
+            country1
+          )}
           ${escapeHTML(
             player1
           )}
-
-          ${
-            match.seed1
-              ? `<em>(${escapeHTML(
-                  match.seed1
-                )})</em>`
-              : ""
-          }
         </b>
 
         <b>
-          ${flag2}
+          ${countryFlag(
+            country2
+          )}
           ${escapeHTML(
             player2
           )}
-
-          ${
-            match.seed2
-              ? `<em>(${escapeHTML(
-                  match.seed2
-                )})</em>`
-              : ""
-          }
         </b>
 
       </div>
@@ -536,7 +480,17 @@ function createMatchHTML(
       <div class="scores">
 
         <b>
-          ${displayScore}
+          ${
+            score
+              ? escapeHTML(
+                  score
+                )
+              : escapeHTML(
+                  formatTime(
+                    match.start
+                  )
+                ) || "—"
+          }
         </b>
 
         ${
@@ -551,7 +505,7 @@ function createMatchHTML(
 
 
       <small>
-        ${status}
+        ${rightSide}
       </small>
 
     </div>
@@ -560,7 +514,159 @@ function createMatchHTML(
 
 
 /* =========================================================
-   RESULTS HEADER DATE
+   RESULTS
+========================================================= */
+
+function renderResults() {
+
+  const card =
+    document.querySelector(
+      ".results-card"
+    );
+
+
+  if (!card) {
+    return;
+  }
+
+
+  /*
+   * Remove old hard-coded
+   * matches.
+   */
+
+  card
+    .querySelectorAll(
+      ".match"
+    )
+    .forEach(
+      element =>
+        element.remove()
+    );
+
+
+  let matches =
+    getFilteredMatches();
+
+
+  /*
+   * Live first.
+   * Then earliest start time.
+   */
+
+  matches.sort(
+    (a, b) => {
+
+      if (
+        isLive(a) !==
+        isLive(b)
+      ) {
+        return isLive(a)
+          ? -1
+          : 1;
+      }
+
+
+      const da =
+        validDate(
+          a.start
+        );
+
+      const db =
+        validDate(
+          b.start
+        );
+
+
+      if (!da && !db) {
+        return 0;
+      }
+
+      if (!da) {
+        return 1;
+      }
+
+      if (!db) {
+        return -1;
+      }
+
+      return (
+        da.getTime() -
+        db.getTime()
+      );
+    }
+  );
+
+
+  /*
+   * Show maximum 8
+   * on homepage.
+   */
+
+  matches =
+    matches.slice(
+      0,
+      8
+    );
+
+
+  if (!matches.length) {
+
+    const empty =
+      document.createElement(
+        "div"
+      );
+
+    empty.className =
+      "match api-empty";
+
+
+    empty.innerHTML = `
+      <div>
+        <b>
+          No matches
+        </b>
+
+        <b>
+          available
+        </b>
+      </div>
+
+      <div class="scores">
+        <b>—</b>
+      </div>
+
+      <small>
+        No matches found
+      </small>
+    `;
+
+
+    card.appendChild(
+      empty
+    );
+
+  } else {
+
+    card.insertAdjacentHTML(
+      "beforeend",
+      matches
+        .map(
+          createMatchHTML
+        )
+        .join("")
+    );
+  }
+
+
+  updateResultsDate();
+
+  updateTabs();
+}
+
+
+/* =========================================================
+   DATE IN RESULTS HEADER
 ========================================================= */
 
 function updateResultsDate() {
@@ -570,55 +676,55 @@ function updateResultsDate() {
       ".results-card .tabs"
     );
 
+
   if (!tabs) {
     return;
   }
 
 
-  let dateSpan =
+  let date =
     tabs.querySelector(
       ".api-date"
     );
 
 
-  if (!dateSpan) {
+  if (!date) {
 
-    dateSpan =
+    date =
       document.createElement(
         "span"
       );
 
-    dateSpan.className =
+    date.className =
       "api-date";
 
+    date.style.marginLeft =
+      "auto";
+
     tabs.appendChild(
-      dateSpan
+      date
     );
   }
 
 
-  const date =
-    todayData?.date
-      ? formatDate(
-          todayData.date
-        )
-      : "";
+  if (
+    todayData &&
+    todayData.date
+  ) {
 
-
-  dateSpan.innerHTML =
-    date
-      ? `▣ &nbsp; ${escapeHTML(
-          date
-        )}`
-      : "";
+    date.textContent =
+      `▣ ${formatDate(
+        todayData.date
+      )}`;
+  }
 }
 
 
 /* =========================================================
-   RESULTS TABS
+   TABS
 ========================================================= */
 
-function setupResultsTabs() {
+function setupTabs() {
 
   const tabs =
     document.querySelector(
@@ -637,14 +743,6 @@ function setupResultsTabs() {
     );
 
 
-  if (
-    buttons.length <
-    4
-  ) {
-    return;
-  }
-
-
   const filters = [
     "atp",
     "wta",
@@ -659,34 +757,18 @@ function setupResultsTabs() {
       index
     ) => {
 
-      /*
-       * Remove old click
-       * handlers by cloning.
-       */
-
-      const newButton =
+      const replacement =
         button.cloneNode(
           true
         );
 
 
       button.replaceWith(
-        newButton
+        replacement
       );
 
 
-      newButton.textContent =
-        filters[index] ===
-        "live"
-          ? "Live"
-          : filters[index]
-              .charAt(0)
-              .toUpperCase() +
-            filters[index]
-              .slice(1);
-
-
-      newButton.addEventListener(
+      replacement.addEventListener(
         "click",
         () => {
 
@@ -702,11 +784,11 @@ function setupResultsTabs() {
   );
 
 
-  updateActiveTab();
+  updateTabs();
 }
 
 
-function updateActiveTab() {
+function updateTabs() {
 
   const buttons =
     document.querySelectorAll(
@@ -740,221 +822,7 @@ function updateActiveTab() {
 
 
 /* =========================================================
-   RENDER RESULTS
-========================================================= */
-
-function renderResults() {
-
-  const card =
-    document.querySelector(
-      ".results-card"
-    );
-
-
-  if (!card) {
-    return;
-  }
-
-
-  let matches =
-    filteredMatches();
-
-
-  matches =
-    sortMatches(
-      matches
-    );
-
-
-  /*
-   * Keep homepage compact.
-   */
-
-  matches =
-    matches.slice(
-      0,
-      8
-    );
-
-
-  /*
-   * Remove old match rows.
-   */
-
-  card
-    .querySelectorAll(
-      ".match"
-    )
-    .forEach(
-      element =>
-        element.remove()
-    );
-
-
-  if (!matches.length) {
-
-    const empty =
-      document.createElement(
-        "div"
-      );
-
-    empty.className =
-      "match api-empty";
-
-    empty.innerHTML = `
-      <div>
-        <b>
-          No matches
-        </b>
-
-        <b>
-          available
-        </b>
-      </div>
-
-      <div class="scores">
-        <b>—</b>
-      </div>
-
-      <small>
-        No ${escapeHTML(
-          resultsFilter
-        )} singles matches
-      </small>
-    `;
-
-
-    card.appendChild(
-      empty
-    );
-
-  } else {
-
-    const html =
-      matches
-        .map(
-          createMatchHTML
-        )
-        .join("");
-
-
-    card.insertAdjacentHTML(
-      "beforeend",
-      html
-    );
-  }
-
-
-  updateActiveTab();
-
-  updateResultsDate();
-}
-
-
-/* =========================================================
    NEXT MASTERS
-========================================================= */
-
-function getUpcomingMasters() {
-
-  const tournaments =
-    calendarData &&
-    Array.isArray(
-      calendarData.tournaments
-    )
-      ? calendarData.tournaments
-      : [];
-
-
-  const now =
-    Date.now();
-
-
-  return tournaments
-    .filter(
-      tournament => {
-
-        if (
-          !tournament ||
-          !tournament.start
-        ) {
-          return false;
-        }
-
-
-        const start =
-          validDate(
-            tournament.start
-          );
-
-
-        if (!start) {
-          return false;
-        }
-
-
-        return (
-          start.getTime() >=
-          now
-        );
-      }
-    )
-    .sort(
-      (a, b) =>
-        new Date(
-          a.start
-        ) -
-        new Date(
-          b.start
-        )
-    );
-}
-
-
-/* =========================================================
-   MASTERS THUMBNAIL CLASS
-========================================================= */
-
-function mastersClass(
-  name
-) {
-
-  const n =
-    String(
-      name || ""
-    ).toLowerCase();
-
-
-  if (
-    n.includes("shanghai")
-  ) {
-    return "shanghai";
-  }
-
-  if (
-    n.includes("paris")
-  ) {
-    return "paris";
-  }
-
-  if (
-    n.includes("miami")
-  ) {
-    return "miami";
-  }
-
-  if (
-    n.includes("madrid")
-  ) {
-    return "madrid";
-  }
-
-  return "shanghai";
-}
-
-
-/* =========================================================
-   RENDER NEXT MASTERS
 ========================================================= */
 
 function renderNextMasters() {
@@ -971,68 +839,76 @@ function renderNextMasters() {
 
 
   const tournaments =
-    getUpcomingMasters()
-      .slice(
-        0,
-        4
-      );
+    calendarData &&
+    Array.isArray(
+      calendarData.tournaments
+    )
+      ? calendarData.tournaments
+      : [];
 
-
-  /*
-   * If API did not return calendar data,
-   * keep the existing HTML.
-   */
 
   if (!tournaments.length) {
     return;
   }
 
 
-  list.innerHTML =
+  const now =
+    Date.now();
+
+
+  const upcoming =
     tournaments
-      .map(
+      .filter(
         tournament => {
 
-          const start =
-            formatShortDate(
+          const d =
+            validDate(
               tournament.start
             );
 
-          const end =
-            formatShortDate(
-              tournament.end
-            );
+          return (
+            d &&
+            d.getTime() >=
+              now
+          );
+        }
+      )
+      .sort(
+        (a, b) =>
+          new Date(
+            a.start
+          ) -
+          new Date(
+            b.start
+          )
+      )
+      .slice(
+        0,
+        4
+      );
 
 
-          const dates =
-            end
-              ? `${start} – ${end}`
-              : start;
+  if (!upcoming.length) {
+    return;
+  }
 
+
+  list.innerHTML =
+    upcoming
+      .map(
+        tournament => {
 
           const tour =
             String(
               tournament.tour ||
               ""
-            ).toLowerCase() ===
-            "wta"
-              ? "WTA"
-              : "ATP";
-
-
-          const tier =
-            tournament.tier ||
-            "Masters";
+            ).toUpperCase();
 
 
           return `
             <article>
 
-              <div
-                class="thumb ${mastersClass(
-                  tournament.name
-                )}"
-              ></div>
+              <div class="thumb"></div>
 
               <div>
 
@@ -1048,10 +924,10 @@ function renderNextMasters() {
                     tour
                   )}
                   ${
-                    tier
+                    tournament.tier
                       ? " " +
                         escapeHTML(
-                          tier
+                          tournament.tier
                         )
                       : ""
                   }
@@ -1059,8 +935,20 @@ function renderNextMasters() {
 
                 <span>
                   ${escapeHTML(
-                    dates
+                    formatShortDate(
+                      tournament.start
+                    )
                   )}
+                  ${
+                    tournament.end
+                      ? " – " +
+                        escapeHTML(
+                          formatShortDate(
+                            tournament.end
+                          )
+                        )
+                      : ""
+                  }
                 </span>
 
               </div>
@@ -1088,11 +976,6 @@ function renderCurrentMasters() {
       : [];
 
 
-  if (!tournaments.length) {
-    return;
-  }
-
-
   const now =
     Date.now();
 
@@ -1109,8 +992,7 @@ function renderCurrentMasters() {
         const end =
           validDate(
             tournament.end
-          ) ||
-          start;
+          );
 
 
         if (
@@ -1153,54 +1035,9 @@ function renderCurrentMasters() {
     );
 
 
-  const paragraphs =
-    card.querySelectorAll(
-      ".featured-info p"
-    );
-
-
   if (title) {
-
     title.textContent =
-      current.name ||
-      title.textContent;
-  }
-
-
-  if (
-    paragraphs.length >=
-    1
-  ) {
-
-    paragraphs[0]
-      .textContent =
-      current.country ||
-      paragraphs[0]
-        .textContent;
-  }
-
-
-  if (
-    paragraphs.length >=
-    2
-  ) {
-
-    const start =
-      formatShortDate(
-        current.start
-      );
-
-    const end =
-      formatShortDate(
-        current.end
-      );
-
-
-    paragraphs[1]
-      .textContent =
-      end
-        ? `${start} – ${end}`
-        : start;
+      current.name;
   }
 }
 
@@ -1231,12 +1068,6 @@ function renderNews() {
       : [];
 
 
-  /*
-   * If API fails or returns
-   * no articles, leave the
-   * existing design/content.
-   */
-
   if (!items.length) {
     return;
   }
@@ -1249,52 +1080,31 @@ function renderNews() {
         3
       )
       .map(
-        (
-          article,
-          index
-        ) => {
+        item => {
 
           const title =
-            article.title ||
+            item.title ||
             "Tennis news";
 
 
-          const date =
-            article.dateLabel ||
-            formatShortDate(
-              article.date
-            ) ||
-            "";
-
-
           const link =
-            article.link ||
+            item.link ||
             "#";
 
 
-          const imageClass =
-            [
-              "player",
-              "court",
-              "crowd"
-            ][index] ||
-            "court";
+          const date =
+            item.dateLabel ||
+            formatShortDate(
+              item.date
+            );
 
 
           return `
             <article>
 
-              <a
-                href="${escapeHTML(
-                  link
-                )}"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="news-img ${imageClass}"
-                aria-label="${escapeHTML(
-                  title
-                )}"
-              ></a>
+              <div
+                class="news-img court"
+              ></div>
 
               <div>
 
@@ -1329,17 +1139,27 @@ function renderNews() {
 
 
 /* =========================================================
-   LOAD TODAY
+   API LOADERS
 ========================================================= */
 
 async function loadToday() {
 
   try {
 
-    todayData =
+    const data =
       await getJSON(
         "/api/today"
       );
+
+
+    console.log(
+      "YepTennis /api/today:",
+      data
+    );
+
+
+    todayData =
+      data;
 
 
     renderResults();
@@ -1347,16 +1167,12 @@ async function loadToday() {
   } catch (error) {
 
     console.error(
-      "YepTennis today API:",
+      "YepTennis today:",
       error
     );
   }
 }
 
-
-/* =========================================================
-   LOAD CALENDAR
-========================================================= */
 
 async function loadCalendar() {
 
@@ -1375,16 +1191,12 @@ async function loadCalendar() {
   } catch (error) {
 
     console.error(
-      "YepTennis calendar API:",
+      "YepTennis calendar:",
       error
     );
   }
 }
 
-
-/* =========================================================
-   LOAD NEWS
-========================================================= */
 
 async function loadNews() {
 
@@ -1401,7 +1213,7 @@ async function loadNews() {
   } catch (error) {
 
     console.error(
-      "YepTennis news API:",
+      "YepTennis news:",
       error
     );
   }
@@ -1409,22 +1221,12 @@ async function loadNews() {
 
 
 /* =========================================================
-   INITIALISE
+   START
 ========================================================= */
 
 async function init() {
 
-  /*
-   * Set up the existing
-   * four buttons in index.html.
-   */
-
-  setupResultsTabs();
-
-
-  /*
-   * Load all live data.
-   */
+  setupTabs();
 
   await Promise.allSettled(
     [
@@ -1435,10 +1237,6 @@ async function init() {
   );
 }
 
-
-/* =========================================================
-   START
-========================================================= */
 
 if (
   document.readyState ===
@@ -1457,32 +1255,18 @@ if (
 
 
 /* =========================================================
-   AUTO REFRESH
+   REFRESH
 ========================================================= */
-
-/*
- * Results every 2 minutes.
- */
 
 setInterval(
   loadToday,
   120000
 );
 
-
-/*
- * Calendar every 30 minutes.
- */
-
 setInterval(
   loadCalendar,
   1800000
 );
-
-
-/*
- * News every 30 minutes.
- */
 
 setInterval(
   loadNews,
