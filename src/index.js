@@ -335,70 +335,82 @@ async function calendar(env) {
   };
 }
 
-function xml(xmlText, source) {
-  return [
-    ...xmlText.matchAll(
-      /<item\b[\s\S]*?<\/item>/gi
-    )
-  ]
+function xml(xml,source){
+  return [...xml.matchAll(/<item\b[\s\S]*?<\/item>/gi)]
     .map(m => m[0])
-    .map(item => {
+    .map(i => {
+
       const clean = s =>
         s
-          .replace(
-            /<!\[CDATA\[([\s\S]*?)\]\]>/g,
-            "$1"
-          )
-          .replace(/<[^>]+>/g, "")
-          .replace(/&amp;/g, "&")
-          .replace(/&quot;/g, '"');
+          .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,"$1")
+          .replace(/<[^>]+>/g,"")
+          .replace(/&amp;/g,"&")
+          .replace(/&quot;/g,'"')
+          .replace(/&#39;/g,"'")
+          .trim();
 
-      const get = tag => {
-        const m = item.match(
-          new RegExp(
-            `<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`,
-            "i"
-          )
+      const g = t => {
+        const m = i.match(
+          new RegExp(`<${t}[^>]*>([\\s\\S]*?)<\\/${t}>`,"i")
         );
-
-        return m
-          ? clean(m[1]).trim()
-          : "";
+        return m ? clean(m[1]) : "";
       };
 
-      const link =
-        (
-          item.match(
-            /<link>([\s\S]*?)<\/link>/i
-          ) || []
-        )[1] || "";
+      let link =
+        (i.match(/<link>([\s\S]*?)<\/link>/i)||[])[1] || "";
 
-      const date =
-        get("pubDate") ||
-        get("published");
+      let date =
+        g("pubDate") ||
+        g("published");
+
+      /* BBC image */
+      let image = "";
+
+      const mediaContent =
+        i.match(/<media:content[^>]+url=["']([^"']+)["']/i);
+
+      const mediaThumbnail =
+        i.match(/<media:thumbnail[^>]+url=["']([^"']+)["']/i);
+
+      const enclosure =
+        i.match(/<enclosure[^>]+url=["']([^"']+)["']/i);
+
+      if(mediaContent){
+        image = mediaContent[1];
+      }else if(mediaThumbnail){
+        image = mediaThumbnail[1];
+      }else if(enclosure){
+        image = enclosure[1];
+      }
+
+      /* BBC sometimes puts the image inside description */
+      if(!image){
+        const description = g("description");
+
+        const img =
+          description.match(/<img[^>]+src=["']([^"']+)["']/i);
+
+        if(img){
+          image = img[1];
+        }
+      }
 
       return {
-        title: get("title"),
-        link: clean(link),
+        title:g("title"),
+        link:clean(link),
         source,
-        dateLabel: date
+        dateLabel:date
           ? new Date(date).toLocaleDateString(
               "en-GB",
-              {
-                day: "numeric",
-                month: "short"
-              }
+              {day:"numeric",month:"short"}
             )
-          : ""
+          : "",
+        image
       };
-    })
-    .filter(
-      x =>
-        x.title &&
-        x.link
-    );
-}
 
+    })
+    .filter(x => x.title && x.link);
+}
 async function news() {
   const urls = [
     [
