@@ -1,3 +1,5 @@
+const VERSION = "YepTennis Worker 2026-09-26.1";
+
 const HOST = "tennis-api-atp-wta-itf.p.rapidapi.com";
 const BASE = `https://${HOST}`;
 
@@ -55,10 +57,15 @@ const arr = d =>
 
 const val = (o, keys, fallback = "") => {
   for (const k of keys) {
-    if (o?.[k] !== undefined && o?.[k] !== null && o[k] !== "") {
+    if (
+      o?.[k] !== undefined &&
+      o?.[k] !== null &&
+      o[k] !== ""
+    ) {
       return o[k];
     }
   }
+
   return fallback;
 };
 
@@ -74,7 +81,11 @@ const player = p => {
 
   return {
     id: val(p, ["id", "playerId"], null),
-    name: val(p, ["name", "playerName", "fullName"], "Player"),
+    name: val(
+      p,
+      ["name", "playerName", "fullName"],
+      "Player"
+    ),
     country: val(
       p,
       ["countryAcr", "country", "countryCode"],
@@ -100,7 +111,10 @@ function extractScore(x) {
     ""
   );
 
-  if (typeof score === "object" && score !== null) {
+  if (
+    typeof score === "object" &&
+    score !== null
+  ) {
     score = val(
       score,
       ["score", "display", "result"],
@@ -156,8 +170,14 @@ function match(x, tour) {
     status,
     live:
       Boolean(x.live) ||
-      /live|inplay|in play/i.test(String(status)),
+      /live|inplay|in play/i.test(
+        String(status)
+      ),
     tournament,
+    tournamentId:
+      x.tournament?.id ||
+      x.tournamentId ||
+      null,
     round,
     start
   };
@@ -217,10 +237,12 @@ async function today(env) {
         `/tennis/v2/atp/fixtures/${d}?include=round,tournament&pageNo=1&pageSize=100&filter=PlayerGroup:singles`,
         env
       ),
+
       call(
         `/tennis/v2/wta/fixtures/${d}?include=round,tournament&pageNo=1&pageSize=100&filter=PlayerGroup:singles`,
         env
       ),
+
       call(
         `/tennis/v2/extend/api/events/live`,
         env
@@ -290,6 +312,7 @@ async function today(env) {
 
   return {
     ok: true,
+    version: VERSION,
     date: d,
     count: matches.length,
     matches
@@ -306,6 +329,7 @@ async function calendar(env) {
         `/tennis/v2/atp/tournament/calendar/${y}?pageNo=1&pageSize=200`,
         env
       ),
+
       call(
         `/tennis/v2/wta/tournament/calendar/${y}?pageNo=1&pageSize=200`,
         env
@@ -314,10 +338,12 @@ async function calendar(env) {
 
   return {
     year: y,
+
     tournaments: [
       ...arr(a).map(x =>
         masters(x, "atp")
       ),
+
       ...arr(w).map(x =>
         masters(x, "wta")
       )
@@ -335,88 +361,125 @@ async function calendar(env) {
   };
 }
 
-function xml(xml,source){
-  return [...xml.matchAll(/<item\b[\s\S]*?<\/item>/gi)]
+function xml(xml, source) {
+  return [
+    ...xml.matchAll(
+      /<item\b[\s\S]*?<\/item>/gi
+    )
+  ]
     .map(m => m[0])
     .map(i => {
 
       const clean = s =>
         s
-          .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,"$1")
-          .replace(/<[^>]+>/g,"")
-          .replace(/&amp;/g,"&")
-          .replace(/&quot;/g,'"')
-          .replace(/&#39;/g,"'")
+          .replace(
+            /<!\[CDATA\[([\s\S]*?)\]\]>/g,
+            "$1"
+          )
+          .replace(/<[^>]+>/g, "")
+          .replace(/&amp;/g, "&")
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
           .trim();
 
       const g = t => {
         const m = i.match(
-          new RegExp(`<${t}[^>]*>([\\s\\S]*?)<\\/${t}>`,"i")
+          new RegExp(
+            `<${t}[^>]*>([\\s\\S]*?)<\\/${t}>`,
+            "i"
+          )
         );
-        return m ? clean(m[1]) : "";
+
+        return m
+          ? clean(m[1])
+          : "";
       };
 
       let link =
-        (i.match(/<link>([\s\S]*?)<\/link>/i)||[])[1] || "";
+        (
+          i.match(
+            /<link>([\s\S]*?)<\/link>/i
+          ) || []
+        )[1] || "";
 
       let date =
         g("pubDate") ||
         g("published");
 
-      /* BBC image */
       let image = "";
 
       const mediaContent =
-        i.match(/<media:content[^>]+url=["']([^"']+)["']/i);
+        i.match(
+          /<media:content[^>]+url=["']([^"']+)["']/i
+        );
 
       const mediaThumbnail =
-        i.match(/<media:thumbnail[^>]+url=["']([^"']+)["']/i);
+        i.match(
+          /<media:thumbnail[^>]+url=["']([^"']+)["']/i
+        );
 
       const enclosure =
-        i.match(/<enclosure[^>]+url=["']([^"']+)["']/i);
+        i.match(
+          /<enclosure[^>]+url=["']([^"']+)["']/i
+        );
 
-      if(mediaContent){
+      if (mediaContent) {
         image = mediaContent[1];
-      }else if(mediaThumbnail){
+      }
+      else if (mediaThumbnail) {
         image = mediaThumbnail[1];
-      }else if(enclosure){
+      }
+      else if (enclosure) {
         image = enclosure[1];
       }
 
-      /* BBC sometimes puts the image inside description */
-      if(!image){
-        const description = g("description");
+      if (!image) {
+        const description =
+          g("description");
 
         const img =
-          description.match(/<img[^>]+src=["']([^"']+)["']/i);
+          description.match(
+            /<img[^>]+src=["']([^"']+)["']/i
+          );
 
-        if(img){
+        if (img) {
           image = img[1];
         }
       }
 
       return {
-        title:g("title"),
-        link:clean(link),
+        title: g("title"),
+        link: clean(link),
         source,
-        dateLabel:date
-          ? new Date(date).toLocaleDateString(
-              "en-GB",
-              {day:"numeric",month:"short"}
-            )
+
+        dateLabel: date
+          ? new Date(date)
+              .toLocaleDateString(
+                "en-GB",
+                {
+                  day: "numeric",
+                  month: "short"
+                }
+              )
           : "",
+
         image
       };
-
     })
-    .filter(x => x.title && x.link);
+    .filter(
+      x =>
+        x.title &&
+        x.link
+    );
 }
+
 async function news() {
   const urls = [
     [
       "https://feeds.bbci.co.uk/sport/tennis/rss.xml",
       "BBC Sport"
     ],
+
     [
       "https://www.atptour.com/en/media/rss-feed/xml-feed",
       "ATP Tour"
@@ -427,11 +490,15 @@ async function news() {
 
   for (const [url, source] of urls) {
     try {
-      const r = await fetch(url, {
-        headers: {
-          "User-Agent": "YepTennis/1.0"
+      const r = await fetch(
+        url,
+        {
+          headers: {
+            "User-Agent":
+              "YepTennis/1.0"
+          }
         }
-      });
+      );
 
       if (r.ok) {
         out.push(
@@ -441,7 +508,8 @@ async function news() {
           )
         );
       }
-    } catch {}
+    }
+    catch {}
   }
 
   return {
@@ -451,68 +519,130 @@ async function news() {
 
 export default {
   async fetch(req, env) {
-    const u = new URL(req.url);
+    const u =
+      new URL(req.url);
 
     try {
-      if (u.pathname === "/api/today") {
+
+      /* HEALTH CHECK */
+
+      if (
+        u.pathname ===
+        "/api/health"
+      ) {
+        return J({
+          ok: true,
+          service: "YepTennis",
+          version: VERSION,
+          apiConfigured:
+            Boolean(
+              env.TENNIS_API_KEY
+            ),
+          host: HOST,
+          time:
+            new Date().toISOString()
+        });
+      }
+
+      /* TODAY */
+
+      if (
+        u.pathname ===
+        "/api/today"
+      ) {
         return J(
           await today(env)
         );
       }
 
-      if (u.pathname === "/api/calendar") {
+      /* CALENDAR */
+
+      if (
+        u.pathname ===
+        "/api/calendar"
+      ) {
         return J(
           await calendar(env)
         );
       }
 
-      if (u.pathname === "/api/rankings") {
+      /* RANKINGS */
+
+      if (
+        u.pathname ===
+        "/api/rankings"
+      ) {
+
         const tour =
-          u.searchParams.get("tour") === "wta"
+          u.searchParams.get(
+            "tour"
+          ) === "wta"
             ? "wta"
             : "atp";
 
-        const d = await call(
-          `/tennis/v2/${tour}/ranking/singles?pageNo=1&pageSize=50`,
-          env
-        );
+        const d =
+          await call(
+            `/tennis/v2/${tour}/ranking/singles?pageNo=1&pageSize=50`,
+            env
+          );
 
         return J({
-          players: arr(d).map(
-            (p, i) => ({
-              ...player(p),
-              rank:
-                player(p).rank ||
-                i + 1
-            })
-          )
+          players:
+            arr(d).map(
+              (p, i) => ({
+                ...player(p),
+
+                rank:
+                  player(p).rank ||
+                  i + 1
+              })
+            )
         });
       }
 
-      if (u.pathname === "/api/news") {
+      /* NEWS */
+
+      if (
+        u.pathname ===
+        "/api/news"
+      ) {
         return J(
           await news()
         );
       }
 
-      if (u.pathname.startsWith("/api/")) {
+      /* UNKNOWN API */
+
+      if (
+        u.pathname.startsWith(
+          "/api/"
+        )
+      ) {
         return J(
           {
             error:
-              "API endpoint not found"
+              "API endpoint not found",
+            version: VERSION,
+            path: u.pathname
           },
           404
         );
       }
 
+      /* WEBSITE */
+
       return env.ASSETS.fetch(req);
 
-    } catch (e) {
+    }
+    catch (e) {
+
       return J(
         {
           error:
             e.message ||
-            "API error"
+            "API error",
+
+          version: VERSION
         },
         500
       );
