@@ -1,1036 +1,1169 @@
+/* =========================================================
+   YepTennis - Frontend
+   ATP / WTA Results + News + Calendar + Rankings
+   ========================================================= */
+
 let todayData = null;
+let calendarData = null;
+let newsData = null;
 let resultsFilter = "all";
 
+
+/* =========================================================
+   START
+   ========================================================= */
+
 document.addEventListener("DOMContentLoaded", () => {
+
   setupNavigation();
   setupResultTabs();
+
   loadToday();
   loadNews();
   loadCalendar();
   loadRankings();
+
 });
 
+
+/* =========================================================
+   MOBILE NAVIGATION
+   ========================================================= */
+
 function setupNavigation() {
+
   const menu = document.querySelector(".menu");
-  const nav = document.querySelector(".mobile-nav");
+  const nav = document.querySelector("nav");
 
-  if (menu && nav) {
-    menu.addEventListener("click", () => {
-      const open = nav.classList.toggle("open");
-      menu.setAttribute(
-        "aria-expanded",
-        open ? "true" : "false"
-      );
-    });
+  if (!menu || !nav) return;
 
-    nav.querySelectorAll("a").forEach(a => {
-      a.addEventListener(
-        "click",
-        () => nav.classList.remove("open")
-      );
-    });
-  }
+  menu.addEventListener("click", () => {
 
-  document.querySelectorAll("nav a").forEach(a => {
-    a.addEventListener("click", () => {
-      document
-        .querySelectorAll("nav a")
-        .forEach(x =>
-          x.classList.remove("active")
-        );
+    nav.classList.toggle("mobile-open");
 
-      a.classList.add("active");
-    });
   });
+
 }
+
+
+/* =========================================================
+   RESULT TABS
+   ========================================================= */
 
 function setupResultTabs() {
-  const tabs =
-    document.querySelector("#results-tabs");
 
-  if (!tabs) return;
+  const tabs = document.querySelectorAll(
+    ".results-card .tabs button"
+  );
 
-  tabs
-    .querySelectorAll("button[data-filter]")
-    .forEach(button => {
-      button.addEventListener("click", () => {
-        resultsFilter =
-          button.dataset.filter || "all";
+  if (!tabs.length) return;
 
-        tabs
-          .querySelectorAll("button")
-          .forEach(x =>
-            x.classList.remove("selected")
-          );
+  tabs.forEach((button, index) => {
 
-        button.classList.add("selected");
+    button.addEventListener("click", () => {
 
-        renderResults();
-      });
+      tabs.forEach(b =>
+        b.classList.remove("selected")
+      );
+
+      button.classList.add("selected");
+
+      if (index === 0) {
+        resultsFilter = "all";
+      }
+
+      if (index === 1) {
+        resultsFilter = "wta";
+      }
+
+      if (index === 2) {
+        resultsFilter = "live";
+      }
+
+      if (index === 3) {
+        resultsFilter = "completed";
+      }
+
+      renderResults();
+
     });
-}
 
-async function fetchJSON(url) {
-  const response = await fetch(url, {
-    cache: "no-store",
-    headers: {
-      Accept: "application/json"
-    }
   });
 
-  const text =
-    await response.text();
+}
+
+
+/* =========================================================
+   GENERIC FETCH
+   ========================================================= */
+
+async function fetchJSON(url) {
+
+  const response = await fetch(url, {
+    cache: "no-store"
+  });
+
+  const text = await response.text();
 
   let data = {};
 
   try {
-    data =
-      text
-        ? JSON.parse(text)
-        : {};
+    data = JSON.parse(text);
   } catch {
-    throw Error(
-      `Invalid response from ${url}`
-    );
+    throw new Error("Invalid JSON response");
   }
 
   if (!response.ok) {
-    throw Error(
-      data.message ||
+
+    throw new Error(
       data.error ||
+      data.message ||
       `HTTP ${response.status}`
     );
+
   }
 
   return data;
+
 }
 
-async function loadToday() {
-  const container =
-    document.querySelector(
-      "#results-list"
-    );
 
-  if (!container) return;
+/* =========================================================
+   TODAY'S RESULTS
+   ========================================================= */
+
+async function loadToday() {
+
+  const container =
+    document.getElementById("results-list");
+
+  if (container) {
+
+    container.innerHTML =
+      `<div class="loading">Loading today's results...</div>`;
+
+  }
 
   try {
+
     todayData =
       await fetchJSON("/api/today");
 
-    if (todayData?.error) {
-      throw Error(
-        todayData.error
-      );
-    }
-
-    updateResultTabCounts();
-    updateResultsDate();
     renderResults();
 
-  } catch (error) {
-    console.error(
-      "YepTennis results:",
-      error
-    );
-
-    container.innerHTML =
-      `<div class="error-state">
-        Results are temporarily unavailable.
-      </div>`;
-
     updateResultsDate();
+
+  } catch (error) {
+
+    console.error("Today API:", error);
+
+    if (container) {
+
+      container.innerHTML =
+        `<div class="loading">
+          Results temporarily unavailable.
+        </div>`;
+
+    }
+
   }
+
 }
 
-function rawMatches() {
-  if (!todayData) return [];
 
-  if (
-    Array.isArray(
-      todayData.matches
-    )
-  ) {
-    return todayData.matches;
-  }
+/* =========================================================
+   NORMALISE MATCH
+   ========================================================= */
 
-  if (
-    Array.isArray(
-      todayData.events
-    )
-  ) {
-    return todayData.events;
-  }
+function normaliseMatch(match) {
 
-  if (
-    Array.isArray(
-      todayData.data
-    )
-  ) {
-    return todayData.data;
-  }
-
-  return [];
-}
-
-function normaliseMatch(x) {
   const p1 =
-    x.player1 ||
-    x.home ||
+    match.player1 ||
+    match.home ||
+    match.playerOne ||
     {};
 
   const p2 =
-    x.player2 ||
-    x.away ||
+    match.player2 ||
+    match.away ||
+    match.playerTwo ||
     {};
 
-  const name = p =>
-    typeof p === "string"
-      ? p
-      : p.name ||
-        p.playerName ||
-        p.fullName ||
-        "Player";
+  const player1 =
+    typeof p1 === "string"
+      ? p1
+      : p1.name ||
+        p1.playerName ||
+        p1.fullName ||
+        "Player 1";
 
-  const country = p =>
-    typeof p === "object"
+  const player2 =
+    typeof p2 === "string"
+      ? p2
+      : p2.name ||
+        p2.playerName ||
+        p2.fullName ||
+        "Player 2";
+
+  const country1 =
+    typeof p1 === "object"
       ? (
-          p.countryAcr ||
-          p.country ||
-          p.countryCode ||
+          p1.countryAcr ||
+          p1.country ||
+          p1.countryCode ||
+          match.country1 ||
           ""
         )
-      : "";
+      : (match.country1 || "");
+
+  const country2 =
+    typeof p2 === "object"
+      ? (
+          p2.countryAcr ||
+          p2.country ||
+          p2.countryCode ||
+          match.country2 ||
+          ""
+        )
+      : (match.country2 || "");
 
   let score =
-    x.score ||
-    x.result ||
-    x.scores ||
+    match.score ||
+    match.result ||
+    match.scores ||
     "";
 
-  if (
-    typeof score === "object" &&
-    score !== null
-  ) {
+  if (typeof score === "object") {
+
     score =
       score.display ||
       score.score ||
-      score.result ||
       "";
+
   }
 
-  const status =
-    x.status ||
-    x.matchStatus ||
-    x.state ||
-    "Scheduled";
-
-  const tour =
-    String(
-      x.tour ||
-      x.gender ||
-      x.type ||
-      ""
-    ).toLowerCase();
-
   return {
+
     id:
-      x.id ||
-      x.matchId ||
-      "",
-
-    player1:
-      name(p1),
-
-    player2:
-      name(p2),
-
-    country1:
-      country(p1),
-
-    country2:
-      country(p2),
-
-    rank1:
-      p1.rank ||
-      x.rank1 ||
-      "",
-
-    rank2:
-      p2.rank ||
-      x.rank2 ||
-      "",
-
-    score,
-
-    status,
-
-    tournament:
-      typeof x.tournament === "object"
-        ? (
-            x.tournament?.name ||
-            ""
-          )
-        : (
-            x.tournament ||
-            x.tournamentName ||
-            ""
-          ),
-
-    round:
-      typeof x.round === "object"
-        ? (
-            x.round?.name ||
-            ""
-          )
-        : (
-            x.round ||
-            x.roundName ||
-            ""
-          ),
-
-    start:
-      x.start ||
-      x.startTime ||
-      x.timeGame ||
-      x.date ||
+      match.id ||
+      match.matchId ||
       "",
 
     tour:
-      tour.includes("wta")
-        ? "wta"
-        : "atp",
+      String(match.tour || "")
+        .toLowerCase(),
+
+    player1,
+    player2,
+
+    country1,
+    country2,
+
+    rank1:
+      match.rank1 ||
+      (typeof p1 === "object"
+        ? p1.rank
+        : "") ||
+      "",
+
+    rank2:
+      match.rank2 ||
+      (typeof p2 === "object"
+        ? p2.rank
+        : "") ||
+      "",
+
+    score: score || "",
+
+    status:
+      match.status ||
+      match.matchStatus ||
+      "Scheduled",
 
     live:
-      Boolean(x.live) ||
+      !!match.live ||
       /live|inplay|in play/i.test(
-        String(status)
-      )
+        String(match.status || "")
+      ),
+
+    tournament:
+      match.tournament ||
+      match.tournamentName ||
+      "",
+
+    round:
+      match.round ||
+      match.roundName ||
+      "",
+
+    start:
+      match.start ||
+      match.startTime ||
+      match.date ||
+      ""
+
   };
+
 }
 
-function getFilteredMatches() {
-  const matches =
-    rawMatches()
-      .map(normaliseMatch);
 
-  if (resultsFilter === "atp") {
-    return matches.filter(
-      x => x.tour === "atp"
-    );
-  }
-
-  if (resultsFilter === "wta") {
-    return matches.filter(
-      x => x.tour === "wta"
-    );
-  }
-
-  if (resultsFilter === "live") {
-    return matches.filter(
-      x => x.live
-    );
-  }
-
-  if (
-    resultsFilter === "completed"
-  ) {
-    return matches.filter(
-      x =>
-        /final|completed|finished/i.test(
-          String(x.status)
-        )
-    );
-  }
-
-  return matches;
-}
+/* =========================================================
+   RENDER RESULTS
+   ========================================================= */
 
 function renderResults() {
+
   const container =
-    document.querySelector(
-      "#results-list"
-    );
+    document.getElementById("results-list");
 
   if (!container) return;
 
-  const matches =
-    getFilteredMatches();
+  if (
+    !todayData ||
+    !Array.isArray(todayData.matches)
+  ) {
 
-  if (!matches.length) {
     container.innerHTML =
-      `<div class="empty-state">
-        No matches available for this selection.
+      `<div class="loading">
+        No results available.
       </div>`;
+
+    updateResultCounts([]);
+
     return;
+
+  }
+
+  const matches =
+    todayData.matches.map(
+      normaliseMatch
+    );
+
+  let filtered = matches;
+
+  if (resultsFilter === "wta") {
+
+    filtered =
+      matches.filter(
+        m => m.tour === "wta"
+      );
+
+  }
+
+  if (resultsFilter === "live") {
+
+    filtered =
+      matches.filter(
+        m => m.live
+      );
+
+  }
+
+  if (resultsFilter === "completed") {
+
+    filtered =
+      matches.filter(
+        m => isCompleted(m)
+      );
+
+  }
+
+  if (!filtered.length) {
+
+    container.innerHTML =
+      `<div class="loading">
+        No matches found.
+      </div>`;
+
+    updateResultCounts(matches);
+
+    return;
+
   }
 
   container.innerHTML =
-    matches
-      .map(match => {
-        const score1 =
-          scorePart(
-            match.score,
-            0
-          );
-
-        const score2 =
-          scorePart(
-            match.score,
-            1
-          );
-
-        const time =
-          match.start
-            ? formatMatchTime(
-                match.start
-              )
-            : "";
-
-        const details = [
-          match.tournament,
-          match.round
-        ]
-          .filter(Boolean)
-          .join(" · ");
-
-        return `
-          <div class="match">
-            <div>
-              <b>
-                ${countryFlag(match.country1)}
-                ${escapeHTML(match.player1)}
-                ${match.rank1 ? `<em>(${escapeHTML(match.rank1)})</em>` : ""}
-              </b>
-
-              <b>
-                ${countryFlag(match.country2)}
-                ${escapeHTML(match.player2)}
-                ${match.rank2 ? `<em>(${escapeHTML(match.rank2)})</em>` : ""}
-              </b>
-
-              ${
-                details
-                  ? `<span class="tournament-name">
-                       ${escapeHTML(details)}
-                     </span>`
-                  : ""
-              }
-            </div>
-
-            <div class="scores">
-              <b>
-                ${escapeHTML(score1)}
-              </b>
-              <b>
-                ${escapeHTML(score2)}
-              </b>
-            </div>
-
-            <small
-              class="${match.live ? "live-status" : ""}"
-            >
-              ${escapeHTML(
-                match.live
-                  ? "LIVE"
-                  : (
-                      match.status ||
-                      time ||
-                      "Scheduled"
-                    )
-              )}
-            </small>
-          </div>
-        `;
-      })
+    filtered
+      .map(renderMatch)
       .join("");
+
+  updateResultCounts(matches);
+
 }
 
-function updateResultTabCounts() {
+
+/* =========================================================
+   COMPLETED STATUS
+   ========================================================= */
+
+function isCompleted(match) {
+
+  return /finished|completed|final|ended/i.test(
+    String(match.status || "")
+  );
+
+}
+
+
+/* =========================================================
+   RENDER ONE MATCH
+   ========================================================= */
+
+function renderMatch(match) {
+
+  const flag1 =
+    flagForCountry(match.country1);
+
+  const flag2 =
+    flagForCountry(match.country2);
+
+  const rank1 =
+    match.rank1
+      ? `<em>(${escapeHTML(match.rank1)})</em>`
+      : "";
+
+  const rank2 =
+    match.rank2
+      ? `<em>(${escapeHTML(match.rank2)})</em>`
+      : "";
+
+  const score =
+    match.score
+      ? escapeHTML(formatScore(match.score))
+      : "";
+
+  const status =
+    match.live
+      ? "LIVE"
+      : match.status || "Scheduled";
+
+  const tournament =
+    match.tournament
+      ? escapeHTML(match.tournament)
+      : "";
+
+  const round =
+    match.round
+      ? escapeHTML(
+          typeof match.round === "object"
+            ? (
+                match.round.name ||
+                match.round.roundName ||
+                ""
+              )
+            : match.round
+        )
+      : "";
+
+  let meta = "";
+
+  if (tournament) {
+    meta += tournament;
+  }
+
+  if (round) {
+
+    if (meta) meta += " · ";
+
+    meta += round;
+
+  }
+
+  return `
+
+    <div class="match">
+
+      <div>
+
+        <b>
+          ${flag1}
+          ${escapeHTML(match.player1)}
+          ${rank1}
+        </b>
+
+        <b>
+          ${flag2}
+          ${escapeHTML(match.player2)}
+          ${rank2}
+        </b>
+
+        ${
+          meta
+            ? `<small class="match-meta">${meta}</small>`
+            : ""
+        }
+
+      </div>
+
+      <div class="scores">
+
+        <b>
+          ${score}
+        </b>
+
+      </div>
+
+      <small>
+        ${escapeHTML(status)}
+      </small>
+
+    </div>
+
+  `;
+
+}
+
+
+/* =========================================================
+   FORMAT SCORE
+   ========================================================= */
+
+function formatScore(score) {
+
+  if (typeof score !== "string") {
+    return "";
+  }
+
+  return score
+    .replace(/\[/g, "")
+    .replace(/\]/g, "")
+    .trim();
+
+}
+
+
+/* =========================================================
+   RESULT COUNTS
+   ========================================================= */
+
+function updateResultCounts(matches) {
+
+  const tabs =
+    document.querySelectorAll(
+      ".results-card .tabs button"
+    );
+
+  if (!tabs.length) return;
+
+  const atp =
+    matches.filter(
+      m => m.tour === "atp"
+    ).length;
+
+  const wta =
+    matches.filter(
+      m => m.tour === "wta"
+    ).length;
+
+  const live =
+    matches.filter(
+      m => m.live
+    ).length;
+
+  const completed =
+    matches.filter(
+      m => isCompleted(m)
+    ).length;
+
+  if (tabs[0]) {
+    tabs[0].textContent =
+      `ATP (${atp})`;
+  }
+
+  if (tabs[1]) {
+    tabs[1].textContent =
+      `WTA (${wta})`;
+  }
+
+  if (tabs[2]) {
+    tabs[2].textContent =
+      `Live (${live})`;
+  }
+
+  if (tabs[3]) {
+    tabs[3].textContent =
+      `Completed (${completed})`;
+  }
+
+}
+
+
+/* =========================================================
+   RESULTS DATE
+   ========================================================= */
+
+function updateResultsDate() {
+
   const tabs =
     document.querySelector(
-      "#results-tabs"
+      ".results-card .tabs"
     );
 
   if (!tabs) return;
 
-  const all =
-    rawMatches().map(
-      normaliseMatch
+  tabs
+    .querySelectorAll(
+      "span:not(.api-date)"
+    )
+    .forEach(
+      element => element.remove()
     );
 
-  const atp =
-    all.filter(
-      x => x.tour === "atp"
-    ).length;
-
-  const wta =
-    all.filter(
-      x => x.tour === "wta"
-    ).length;
-
-  const live =
-    all.filter(
-      x => x.live
-    ).length;
-
-  const completed =
-    all.filter(
-      x =>
-        /final|completed|finished/i.test(
-          String(x.status)
-        )
-    ).length;
-
-  const setLabel = (
-    filter,
-    text
-  ) => {
-    const button =
-      tabs.querySelector(
-        `button[data-filter="${filter}"]`
-      );
-
-    if (button) {
-      button.textContent = text;
-    }
-  };
-
-  setLabel(
-    "atp",
-    `ATP (${atp})`
-  );
-
-  setLabel(
-    "wta",
-    `WTA (${wta})`
-  );
-
-  setLabel(
-    "live",
-    `LIVE (${live})`
-  );
-
-  setLabel(
-    "completed",
-    `Completed (${completed})`
-  );
-}
-
-function updateResultsDate() {
-  const date =
-    document.querySelector(
+  let date =
+    tabs.querySelector(
       ".api-date"
     );
 
-  if (date) {
-    date.textContent =
-      `▣ ${formatDate(
-        todayData?.date ||
-        todayData?.checkedUTC ||
-        new Date()
-          .toISOString()
-          .slice(0, 10)
-      )}`;
+  if (!date) {
+
+    date =
+      document.createElement(
+        "span"
+      );
+
+    date.className =
+      "api-date";
+
+    date.style.marginLeft =
+      "auto";
+
+    tabs.appendChild(date);
+
   }
+
+  if (
+    todayData &&
+    todayData.date
+  ) {
+
+    date.textContent =
+      `▣ ${formatDate(todayData.date)}`;
+
+  }
+
 }
 
+
+/* =========================================================
+   DATE FORMAT
+   ========================================================= */
+
 function formatDate(value) {
+
   if (!value) return "";
 
-  const raw =
-    String(value);
-
   const d =
-    raw.length === 10
-      ? new Date(
-          `${raw}T12:00:00`
-        )
-      : new Date(raw);
+    new Date(value);
 
-  if (isNaN(d)) {
-    return raw;
+  if (Number.isNaN(d.getTime())) {
+    return value;
   }
 
   return d.toLocaleDateString(
     "en-GB",
     {
-      day: "2-digit",
+      weekday: "short",
+      day: "numeric",
       month: "short",
       year: "numeric"
     }
   );
+
 }
 
-function formatMatchTime(value) {
-  const d =
-    new Date(value);
 
-  if (isNaN(d)) {
-    return "";
-  }
-
-  return d.toLocaleTimeString(
-    "en-GB",
-    {
-      hour: "2-digit",
-      minute: "2-digit"
-    }
-  );
-}
-
-function scorePart(score, index) {
-  if (!score) return "—";
-
-  if (Array.isArray(score)) {
-    return score[index] || "—";
-  }
-
-  const text =
-    String(score);
-
-  if (text.includes("|")) {
-    return (
-      text.split("|")[index] ||
-      "—"
-    );
-  }
-
-  return text;
-}
-
-function countryFlag(country) {
-  const flags = {
-    FRA: "🇫🇷",
-    ESP: "🇪🇸",
-    ITA: "🇮🇹",
-    SRB: "🇷🇸",
-    USA: "🇺🇸",
-    GBR: "🇬🇧",
-    GER: "🇩🇪",
-    AUS: "🇦🇺",
-    RUS: "🇷🇺",
-    POL: "🇵🇱",
-    CZE: "🇨🇿",
-    CAN: "🇨🇦",
-    JPN: "🇯🇵",
-    CHN: "🇨🇳",
-    BRA: "🇧🇷",
-    ARG: "🇦🇷",
-    BEL: "🇧🇪",
-    AUT: "🇦🇹",
-    SUI: "🇨🇭",
-    SWE: "🇸🇪",
-    NED: "🇳🇱",
-    CRO: "🇭🇷",
-    GRE: "🇬🇷",
-    DEN: "🇩🇰",
-    NOR: "🇳🇴",
-    FIN: "🇫🇮",
-    UKR: "🇺🇦",
-    KAZ: "🇰🇿",
-    CHI: "🇨🇱",
-    COL: "🇨🇴",
-    MEX: "🇲🇽",
-    SRB: "🇷🇸"
-  };
-
-  return (
-    flags[
-      String(
-        country
-      ).toUpperCase()
-    ] || ""
-  );
-}
+/* =========================================================
+   BBC / TENNIS NEWS
+   ========================================================= */
 
 async function loadNews() {
+
   const container =
-    document.querySelector(
-      "#news-list"
-    );
+    document.getElementById("news-list");
 
   if (!container) return;
 
+  container.innerHTML =
+    `<div class="loading">
+      Loading latest news...
+    </div>`;
+
   try {
-    const data =
-      await fetchJSON(
-        "/api/news"
-      );
 
-    const items =
-      Array.isArray(data)
-        ? data
-        : (
-            data.news ||
-            data.items ||
-            []
-          );
+    newsData =
+      await fetchJSON("/api/news");
 
-    if (!items.length) {
-      container.innerHTML =
-        `<div class="empty-state">
-          No latest news available.
-        </div>`;
-      return;
-    }
-
-    container.innerHTML =
-      items
-        .slice(0, 5)
-        .map(
-          (x, i) =>
-            `<article>
-              <div
-                class="news-img ${
-                  ["player","court","crowd"][i % 3]
-                }"
-                ${
-                  x.image
-                    ? `style="background-image:url('${escapeAttribute(x.image)}')"`
-                    : ""
-                }
-              ></div>
-
-              <div>
-                <b>
-                  ${escapeHTML(
-                    x.title ||
-                    x.name ||
-                    "Tennis news"
-                  )}
-                </b>
-
-                <span>
-                  ${escapeHTML(
-                    formatNewsDate(
-                      x.date ||
-                      x.pubDate ||
-                      x.published ||
-                      x.dateLabel ||
-                      ""
-                    )
-                  )}
-                </span>
-              </div>
-            </article>`
-        )
-        .join("");
+    renderNews();
 
   } catch (error) {
-    console.log(
-      "YepTennis news:",
-      error
-    );
+
+    console.error("News API:", error);
 
     container.innerHTML =
-      `<div class="empty-state">
-        News are temporarily unavailable.
+      `<div class="loading">
+        News temporarily unavailable.
       </div>`;
+
   }
+
 }
 
-function formatNewsDate(value) {
-  if (!value) return "Latest";
 
-  const d =
-    new Date(value);
+/* =========================================================
+   RENDER NEWS
+   ========================================================= */
 
-  return isNaN(d)
-    ? value
-    : d.toLocaleDateString(
-        "en-GB",
-        {
-          day: "2-digit",
-          month: "short",
-          year: "numeric"
-        }
-      );
-}
+function renderNews() {
 
-async function loadCalendar() {
   const container =
-    document.querySelector(
-      "#calendar-list"
-    );
+    document.getElementById("news-list");
 
   if (!container) return;
 
-  try {
-    const data =
-      await fetchJSON(
-        "/api/calendar"
-      );
+  const items =
+    newsData &&
+    Array.isArray(newsData.items)
+      ? newsData.items.slice(0, 6)
+      : [];
 
-    const items =
-      Array.isArray(data)
-        ? data
-        : (
-            data.tournaments ||
-            data.data ||
-            []
-          );
-
-    if (!items.length) {
-      container.innerHTML =
-        `<div class="empty-state">
-          Tournament calendar unavailable.
-        </div>`;
-      return;
-    }
-
-    container.innerHTML =
-      items
-        .slice(0, 20)
-        .map(item => {
-          const start =
-            item.start ||
-            item.startDate ||
-            item.date ||
-            "";
-
-          const end =
-            item.end ||
-            item.endDate ||
-            "";
-
-          return `
-            <article class="calendar-item">
-              <div class="calendar-date">
-                ${escapeHTML(
-                  calendarDate(
-                    start,
-                    end
-                  )
-                )}
-              </div>
-
-              <div>
-                <div class="calendar-name">
-                  ${escapeHTML(
-                    item.name ||
-                    item.tournamentName ||
-                    "Tournament"
-                  )}
-                </div>
-
-                <div class="calendar-meta">
-                  ${escapeHTML(
-                    String(
-                      item.tour ||
-                      item.gender ||
-                      "ATP / WTA"
-                    ).toUpperCase()
-                  )}
-                  ${
-                    item.country
-                      ? ` · ${escapeHTML(item.country)}`
-                      : ""
-                  }
-                </div>
-              </div>
-
-              <div class="calendar-tour">
-                ${escapeHTML(
-                  item.tier ||
-                  item.rank ||
-                  ""
-                )}
-              </div>
-            </article>
-          `;
-        })
-        .join("");
-
-  } catch (error) {
-    console.log(
-      "YepTennis calendar:",
-      error
-    );
-
-    container.innerHTML =
-      `<div class="empty-state">
-        Tournament calendar is temporarily unavailable.
-      </div>`;
-  }
-}
-
-function calendarDate(start, end) {
-  if (!start) return "TBC";
-
-  const a =
-    new Date(start);
-
-  if (isNaN(a)) return start;
-
-  const format =
-    d =>
-      d.toLocaleDateString(
-        "en-GB",
-        {
-          day: "2-digit",
-          month: "short"
-        }
-      );
-
-  if (!end) {
-    return format(a);
-  }
-
-  const b =
-    new Date(end);
-
-  if (isNaN(b)) {
-    return format(a);
-  }
-
-  return `${format(a)} – ${format(b)}`;
-}
-
-async function loadRankings() {
-  for (
-    const [tour, id] of [
-      ["atp", "atp-ranking-list"],
-      ["wta", "wta-ranking-list"]
-    ]
-  ) {
-    const container =
-      document.getElementById(id);
-
-    if (!container) continue;
-
-    try {
-      const data =
-        await fetchJSON(
-          `/api/rankings?tour=${tour}`
-        );
-
-      const items =
-        Array.isArray(data?.players)
-          ? data.players
-          : Array.isArray(data?.[tour])
-            ? data[tour]
-            : [];
-
-      renderRanking(
-        container,
-        items
-      );
-
-    } catch {
-      container.innerHTML =
-        `<div class="empty-state">
-          Rankings will appear here when the daily data feed is available.
-        </div>`;
-    }
-  }
-}
-
-function renderRanking(
-  container,
-  items
-) {
   if (!items.length) {
+
     container.innerHTML =
-      `<div class="empty-state">
-        No ranking data available.
+      `<div class="loading">
+        No news available.
       </div>`;
+
     return;
+
   }
 
   container.innerHTML =
     items
-      .slice(0, 5)
-      .map(
-        (x, i) =>
-          `<div class="ranking-row">
-            <div class="ranking-number">
+      .map(renderNewsItem)
+      .join("");
+
+}
+
+
+/* =========================================================
+   ONE NEWS ITEM
+   ========================================================= */
+
+function renderNewsItem(item) {
+
+  const title =
+    item.title ||
+    "Tennis news";
+
+  const link =
+    item.link ||
+    "#";
+
+  const source =
+    item.source ||
+    "Tennis";
+
+  const date =
+    item.dateLabel ||
+    "";
+
+  /*
+    BBC image supplied by /api/news.
+
+    If the BBC RSS feed contains an image,
+    it is displayed as a square 90 x 90 image.
+  */
+
+  let imageHTML = "";
+
+  if (item.image) {
+
+    imageHTML = `
+      <img
+        class="news-img"
+        src="${escapeHTML(item.image)}"
+        alt=""
+        loading="lazy"
+      >
+    `;
+
+  } else {
+
+    imageHTML = `
+      <div class="news-img news-placeholder"></div>
+    `;
+
+  }
+
+  return `
+
+    <a
+      class="news-item"
+      href="${escapeHTML(link)}"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+
+      ${imageHTML}
+
+      <div class="news-content">
+
+        <b>
+          ${escapeHTML(title)}
+        </b>
+
+        ${
+          item.description
+            ? `<p>${escapeHTML(
+                shortenText(item.description, 150)
+              )}</p>`
+            : ""
+        }
+
+        <span>
+          ${escapeHTML(source)}
+          ${date ? ` · ${escapeHTML(date)}` : ""}
+        </span>
+
+      </div>
+
+    </a>
+
+  `;
+
+}
+
+
+/* =========================================================
+   SHORTEN NEWS TEXT
+   ========================================================= */
+
+function shortenText(text, maxLength) {
+
+  if (!text) return "";
+
+  text =
+    String(text)
+      .replace(/\s+/g, " ")
+      .trim();
+
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return (
+    text.substring(0, maxLength)
+      .replace(/\s+\S*$/, "") +
+    "..."
+  );
+
+}
+
+
+/* =========================================================
+   CALENDAR
+   ========================================================= */
+
+async function loadCalendar() {
+
+  const container =
+    document.getElementById(
+      "calendar-list"
+    );
+
+  if (!container) return;
+
+  try {
+
+    calendarData =
+      await fetchJSON(
+        "/api/calendar"
+      );
+
+    renderCalendar();
+
+  } catch (error) {
+
+    console.error(
+      "Calendar API:",
+      error
+    );
+
+    container.innerHTML =
+      `<div class="loading">
+        Calendar temporarily unavailable.
+      </div>`;
+
+  }
+
+}
+
+
+/* =========================================================
+   RENDER CALENDAR
+   ========================================================= */
+
+function renderCalendar() {
+
+  const container =
+    document.getElementById(
+      "calendar-list"
+    );
+
+  if (!container) return;
+
+  const tournaments =
+    calendarData &&
+    Array.isArray(
+      calendarData.tournaments
+    )
+      ? calendarData.tournaments
+      : [];
+
+  if (!tournaments.length) {
+
+    container.innerHTML =
+      `<div class="loading">
+        No tournament data available.
+      </div>`;
+
+    return;
+
+  }
+
+  container.innerHTML =
+    tournaments
+      .slice(0, 12)
+      .map(t => {
+
+        return `
+
+          <article class="calendar-item">
+
+            <b>
+              ${escapeHTML(
+                t.name || "Tournament"
+              )}
+            </b>
+
+            <span>
               ${escapeHTML(
                 String(
-                  x.rank ||
-                  x.currentRank ||
-                  i + 1
-                )
+                  t.tour || ""
+                ).toUpperCase()
               )}
-            </div>
+            </span>
 
-            <div>
-              <div class="ranking-player">
+            <span>
+              ${
+                t.start
+                  ? formatDate(t.start)
+                  : ""
+              }
+            </span>
+
+          </article>
+
+        `;
+
+      })
+      .join("");
+
+}
+
+
+/* =========================================================
+   RANKINGS
+   ========================================================= */
+
+async function loadRankings() {
+
+  loadRanking(
+    "atp",
+    "atp-ranking-list"
+  );
+
+  loadRanking(
+    "wta",
+    "wta-ranking-list"
+  );
+
+}
+
+
+/* =========================================================
+   LOAD ONE RANKING
+   ========================================================= */
+
+async function loadRanking(
+  tour,
+  elementId
+) {
+
+  const container =
+    document.getElementById(
+      elementId
+    );
+
+  if (!container) return;
+
+  try {
+
+    const data =
+      await fetchJSON(
+        `/api/rankings?tour=${tour}`
+      );
+
+    const players =
+      Array.isArray(data.players)
+        ? data.players
+        : [];
+
+    if (!players.length) {
+
+      container.innerHTML =
+        `<div class="loading">
+          Rankings unavailable.
+        </div>`;
+
+      return;
+
+    }
+
+    container.innerHTML =
+      players
+        .slice(0, 10)
+        .map((player, index) => {
+
+          const rank =
+            player.rank ||
+            index + 1;
+
+          return `
+
+            <div class="ranking-row">
+
+              <strong>
+                ${escapeHTML(rank)}
+              </strong>
+
+              <span>
                 ${escapeHTML(
-                  x.name ||
-                  x.playerName ||
-                  x.fullName ||
+                  player.name ||
                   "Player"
                 )}
-              </div>
+              </span>
 
-              <div class="ranking-country">
-                ${escapeHTML(
-                  x.countryAcr ||
-                  x.country ||
-                  x.countryCode ||
-                  ""
-                )}
-              </div>
+              <small>
+                ${
+                  player.points
+                    ? escapeHTML(
+                        String(
+                          player.points
+                        )
+                      )
+                    : ""
+                }
+              </small>
+
             </div>
 
-            <div class="ranking-points">
-              ${escapeHTML(
-                String(
-                  x.points ||
-                  x.rankingPoints ||
-                  ""
-                )
-              )}
-            </div>
-          </div>`
-      )
-      .join("");
+          `;
+
+        })
+        .join("");
+
+  } catch (error) {
+
+    console.error(
+      `${tour} rankings:`,
+      error
+    );
+
+    container.innerHTML =
+      `<div class="loading">
+        Rankings unavailable.
+      </div>`;
+
+  }
+
 }
+
+
+/* =========================================================
+   FLAGS
+   ========================================================= */
+
+function flagForCountry(
+  country
+) {
+
+  const c =
+    String(country || "")
+      .toUpperCase();
+
+  const flags = {
+
+    USA: "🇺🇸",
+    GBR: "🇬🇧",
+    FRA: "🇫🇷",
+    ESP: "🇪🇸",
+    ITA: "🇮🇹",
+    SRB: "🇷🇸",
+    GER: "🇩🇪",
+    SUI: "🇨🇭",
+    AUT: "🇦🇹",
+    BEL: "🇧🇪",
+    CRO: "🇭🇷",
+    CZE: "🇨🇿",
+    DEN: "🇩🇰",
+    POL: "🇵🇱",
+    NED: "🇳🇱",
+    GRE: "🇬🇷",
+    RUS: "🇷🇺",
+    UKR: "🇺🇦",
+    CAN: "🇨🇦",
+    AUS: "🇦🇺",
+    JPN: "🇯🇵",
+    CHN: "🇨🇳",
+    KOR: "🇰🇷",
+    BRA: "🇧🇷",
+    ARG: "🇦🇷",
+    CHI: "🇨🇱",
+    COL: "🇨🇴",
+    MEX: "🇲🇽",
+    TUN: "🇹🇳",
+    POR: "🇵🇹",
+    ROU: "🇷🇴",
+    BUL: "🇧🇬",
+    KAZ: "🇰🇿",
+    HUN: "🇭🇺",
+    SVK: "🇸🇰",
+    SRB: "🇷🇸",
+    SWE: "🇸🇪",
+    NOR: "🇳🇴",
+    FIN: "🇫🇮",
+    RSA: "🇿🇦",
+    IND: "🇮🇳",
+    NZL: "🇳🇿"
+
+  };
+
+  return flags[c] || "🌐";
+
+}
+
+
+/* =========================================================
+   HTML ESCAPE
+   ========================================================= */
 
 function escapeHTML(value) {
-  return String(
-    value ?? ""
-  )
-    .replaceAll(
-      "&",
-      "&amp;"
-    )
-    .replaceAll(
-      "<",
-      "&lt;"
-    )
-    .replaceAll(
-      ">",
-      "&gt;"
-    )
-    .replaceAll(
-      '"',
-      "&quot;"
-    )
-    .replaceAll(
-      "'",
-      "&#039;"
-    );
-}
 
-function escapeAttribute(value) {
-  return String(
-    value ?? ""
-  )
-    .replaceAll(
-      "&",
-      "&amp;"
-    )
-    .replaceAll(
-      '"',
-      "&quot;"
-    )
-    .replaceAll(
-      "<",
-      "&lt;"
-    )
-    .replaceAll(
-      ">",
-      "&gt;"
-    );
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
 }
