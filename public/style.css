@@ -512,6 +512,64 @@ button { font: inherit; }
   min-height: 110px;
 }
 
+/* API-DRIVEN RESULT GROUPS */
+.api-tournament-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 20px 10px;
+  border-top: 1px solid var(--line);
+  background: #f7faf8;
+}
+
+.api-tournament-header:first-child {
+  border-top: 0;
+}
+
+.api-tournament-header strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.api-tournament-header span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.api-match {
+  background: #fff;
+}
+
+.api-match .match-players {
+  min-width: 0;
+}
+
+.api-match .match-round {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.api-match .scores b {
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+.api-message {
+  padding: 34px 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .match {
   display: grid;
   grid-template-columns: minmax(250px,1fr) 150px 90px;
@@ -857,6 +915,17 @@ button { font: inherit; }
   .tour-links a {
     min-width: 100px;
     padding: 10px 12px;
+  }
+
+  .api-tournament-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+    padding: 15px 14px 9px;
+  }
+
+  .api-tournament-header span {
+    font-size: 8px;
   }
 
   .match {

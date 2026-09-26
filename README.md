@@ -9,28 +9,17 @@
 - Browser refresh of today's results every 60 seconds
 
 ## RapidAPI quota protection
-The worker caches every RapidAPI response in a Cloudflare KV namespace so the
-upstream API is only actually called on a schedule, no matter how many
-visitors hit the site or how often the browser polls:
+The worker uses Cloudflare's built-in edge Cache API so repeated visitor
+requests do not call RapidAPI again and again.
 
-- `/api/today` and `/api/debug` — refetched at most **every 12 hours**
-  (≈2 calls/day)
-- `/api/calendar` and `/api/rankings` — refetched at most **every 24 hours**
-  (≈1 call/day each)
+- `/api/today` and `/api/debug` — cached for 12 hours
+- `/api/calendar` and `/api/rankings` — cached for 24 hours
 
-The 60-second browser refresh only re-reads the worker's own cache, so it does
-not add extra load against your RapidAPI plan.
+The browser can refresh today's results every 60 seconds; those requests read
+the worker cache and do not normally create another RapidAPI request.
 
-### Setting up the cache
-1. Create a KV namespace:
-   ```
-   npx wrangler kv namespace create TENNIS_CACHE
-   ```
-2. Copy the `id` it prints into `wrangler.json`, replacing
-   `REPLACE_WITH_YOUR_KV_NAMESPACE_ID`.
-3. Deploy. If the KV binding is ever missing or misconfigured, the worker
-   still works — it just falls back to calling RapidAPI on every request, so
-   don't skip this step if you're on a limited plan.
+No KV namespace is required for this version. This avoids deployment failures
+caused by an unset or placeholder KV namespace ID.
 
 ## Important
 The RapidAPI key is NOT in the website or GitHub. It is a Cloudflare Worker secret named:

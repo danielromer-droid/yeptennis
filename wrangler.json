@@ -7,11 +7,5 @@
     "directory": "./public",
     "binding": "ASSETS",
     "run_worker_first": ["/api/*"]
-  },
-  "kv_namespaces": [
-    {
-      "binding": "TENNIS_CACHE",
-      "id": "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
-    }
-  ]
+  }
 }

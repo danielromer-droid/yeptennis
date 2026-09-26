@@ -1,4 +1,4 @@
-const VERSION = "YepTennis Worker 2026-09-26.3";
+const VERSION = "YepTennis Worker 2026-09-26.4";
 
 const HOST = "tennis-api-atp-wta-itf.p.rapidapi.com";
 const BASE = `https://${HOST}`;
@@ -8,8 +8,8 @@ const BASE = `https://${HOST}`;
 
    Every one of these is a call that counts against the
    RapidAPI monthly quota. To stay under a free/low plan,
-   we cache each endpoint in Cloudflare KV so the upstream
-   API is only actually hit once per TTL, no matter how
+   we cache each endpoint in Cloudflare's edge Cache API so the
+   upstream API is only actually hit once per TTL, no matter how
    many visitors load the site or how often the browser
    polls the worker.
 
@@ -32,27 +32,38 @@ const J = (x, s = 200) =>
   });
 
 /* =====================================================
-   KV CACHE WRAPPER
+   EDGE CACHE WRAPPER
 
-   If env.TENNIS_CACHE isn't bound yet (not configured in
-   wrangler.json / dashboard), this quietly falls back to
-   calling the upstream API directly every time, so the
-   site still works while you set the KV namespace up.
+   Uses Cloudflare's built-in Cache API. No KV namespace is
+   required, so wrangler.json remains deployable without a
+   placeholder namespace ID.
    ===================================================== */
 
 async function cached(env, key, ttlSeconds, fetcher) {
-  const kv = env.TENNIS_CACHE;
+  /*
+     Use Cloudflare's built-in Cache API so the project does not require a
+     KV namespace just to deploy. The cache is shared at the edge and keeps
+     repeated visitor requests from calling RapidAPI again and again.
 
-  if (kv) {
-    try {
-      const hit = await kv.get(key, "json");
+     If the edge cache has no copy yet, fetch the upstream data once and
+     store the JSON response with the requested TTL.
+  */
 
-      if (hit) {
-        return { ...hit, cached: true };
-      }
-    } catch {
-      /* KV read failed - fall through to a live fetch */
+  const cache = caches.default;
+  const cacheKey = new Request(
+    `https://yeptennis.com/__yeptennis_cache/${encodeURIComponent(key)}`
+  );
+
+  try {
+    const hit = await cache.match(cacheKey);
+
+    if (hit) {
+      const data = await hit.json();
+      return { ...data, cached: true };
     }
+  }
+  catch {
+    /* Cache read failure - fall through to a live fetch. */
   }
 
   const fresh = await fetcher();
@@ -63,14 +74,21 @@ async function cached(env, key, ttlSeconds, fetcher) {
     cachedAt: new Date().toISOString()
   };
 
-  if (kv) {
-    try {
-      await kv.put(key, JSON.stringify(payload), {
-        expirationTtl: ttlSeconds
-      });
-    } catch {
-      /* KV write failed - not fatal, just no caching this round */
-    }
+  try {
+    const response = new Response(
+      JSON.stringify(payload),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": `public, max-age=${ttlSeconds}`
+        }
+      }
+    );
+
+    await cache.put(cacheKey, response);
+  }
+  catch {
+    /* Cache write failure - the API response itself is still valid. */
   }
 
   return payload;
@@ -874,6 +892,9 @@ function xml(xml, source) {
 
         title:
           g("title"),
+
+        description:
+          g("description"),
 
         link:
           clean(link),
