@@ -1,0 +1,509 @@
+const HOST = "tennis-api-atp-wta-itf.p.rapidapi.com";
+const BASE = `https://${HOST}`;
+
+const J = (x, s = 200) =>
+  new Response(JSON.stringify(x), {
+    status: s,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store"
+    }
+  });
+
+async function call(path, env) {
+  if (!env.TENNIS_API_KEY) {
+    throw Error("TENNIS_API_KEY is not configured in Cloudflare.");
+  }
+
+  const r = await fetch(BASE + path, {
+    headers: {
+      "X-RapidAPI-Key": env.TENNIS_API_KEY,
+      "X-RapidAPI-Host": HOST
+    }
+  });
+
+  const t = await r.text();
+
+  let d;
+  try {
+    d = JSON.parse(t);
+  } catch {
+    d = {};
+  }
+
+  if (!r.ok) {
+    throw Error(
+      d.message ||
+      d.error ||
+      `Tennis API HTTP ${r.status}`
+    );
+  }
+
+  return d;
+}
+
+const arr = d =>
+  Array.isArray(d)
+    ? d
+    : Array.isArray(d?.data)
+      ? d.data
+      : Array.isArray(d?.results)
+        ? d.results
+        : Array.isArray(d?.result)
+          ? d.result
+          : [];
+
+const val = (o, keys, fallback = "") => {
+  for (const k of keys) {
+    if (o?.[k] !== undefined && o?.[k] !== null && o[k] !== "") {
+      return o[k];
+    }
+  }
+  return fallback;
+};
+
+const player = p => {
+  if (typeof p === "string") {
+    return {
+      name: p,
+      country: "",
+      rank: null,
+      points: 0
+    };
+  }
+
+  return {
+    id: val(p, ["id", "playerId"], null),
+    name: val(p, ["name", "playerName", "fullName"], "Player"),
+    country: val(
+      p,
+      ["countryAcr", "country", "countryCode"],
+      ""
+    ),
+    rank: val(
+      p,
+      ["currentRank", "rank", "ranking"],
+      null
+    ),
+    points: val(
+      p,
+      ["points", "rankingPoints"],
+      0
+    )
+  };
+};
+
+function extractScore(x) {
+  let score = val(
+    x,
+    ["result", "score", "scores"],
+    ""
+  );
+
+  if (typeof score === "object" && score !== null) {
+    score = val(
+      score,
+      ["score", "display", "result"],
+      ""
+    );
+  }
+
+  if (Array.isArray(score)) {
+    return score;
+  }
+
+  return score || "";
+}
+
+function match(x, tour) {
+  const a = player(x.player1 || x.home);
+  const b = player(x.player2 || x.away);
+
+  const status = val(
+    x,
+    ["status", "matchStatus", "state"],
+    "Scheduled"
+  );
+
+  const tournament =
+    typeof x.tournament === "object"
+      ? val(x.tournament, ["name"], "")
+      : val(x, ["tournamentName"], "");
+
+  const round =
+    typeof x.round === "object"
+      ? val(x.round, ["name"], "")
+      : val(x, ["round", "roundName"], "");
+
+  const start = val(
+    x,
+    ["startTime", "timeGame", "date", "start"],
+    ""
+  );
+
+  return {
+    id: val(x, ["id", "matchId"], null),
+    tour,
+    player1: a.name,
+    player2: b.name,
+    player1Id: a.id,
+    player2Id: b.id,
+    country1: a.country,
+    country2: b.country,
+    rank1: a.rank,
+    rank2: b.rank,
+    score: extractScore(x),
+    status,
+    live:
+      Boolean(x.live) ||
+      /live|inplay|in play/i.test(String(status)),
+    tournament,
+    round,
+    start
+  };
+}
+
+function masters(x, tour) {
+  const name = val(
+    x,
+    ["name", "tournamentName"]
+  );
+
+  const tier = val(
+    x,
+    ["tier", "level", "category"]
+  );
+
+  const rank =
+    x.rank?.name ||
+    x.rankName ||
+    "";
+
+  return {
+    name,
+    tour,
+    tier: tier || rank,
+    start: val(
+      x,
+      ["date", "startDate", "start"]
+    ),
+    end: val(
+      x,
+      ["endDate", "end"]
+    ),
+    country:
+      x.country?.name ||
+      x.countryName ||
+      "",
+    surface:
+      x.court?.name ||
+      x.surface ||
+      "",
+    isMasters:
+      /masters|1000/i.test(
+        `${name} ${tier} ${rank}`
+      )
+  };
+}
+
+async function today(env) {
+  const d = new Date()
+    .toISOString()
+    .slice(0, 10);
+
+  const [a, w, l] =
+    await Promise.allSettled([
+      call(
+        `/tennis/v2/atp/fixtures/${d}?include=round,tournament&pageNo=1&pageSize=100&filter=PlayerGroup:singles`,
+        env
+      ),
+      call(
+        `/tennis/v2/wta/fixtures/${d}?include=round,tournament&pageNo=1&pageSize=100&filter=PlayerGroup:singles`,
+        env
+      ),
+      call(
+        `/tennis/v2/extend/api/events/live`,
+        env
+      )
+    ]);
+
+  let matches = [];
+
+  if (a.status === "fulfilled") {
+    matches.push(
+      ...arr(a.value).map(x =>
+        match(x, "atp")
+      )
+    );
+  }
+
+  if (w.status === "fulfilled") {
+    matches.push(
+      ...arr(w.value).map(x =>
+        match(x, "wta")
+      )
+    );
+  }
+
+  if (l.status === "fulfilled") {
+    for (const x of arr(l.value)) {
+      const p1 = val(
+        x,
+        ["player1", "player1Name"],
+        ""
+      );
+
+      const p2 = val(
+        x,
+        ["player2", "player2Name"],
+        ""
+      );
+
+      const found = matches.find(
+        z =>
+          (
+            z.player1 === p1 &&
+            z.player2 === p2
+          ) ||
+          (
+            z.player1 === p2 &&
+            z.player2 === p1
+          )
+      );
+
+      if (found) {
+        found.live = true;
+        found.status = "Live";
+
+        const liveScore = val(
+          x,
+          ["score", "result"],
+          ""
+        );
+
+        if (liveScore) {
+          found.score = liveScore;
+        }
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    date: d,
+    count: matches.length,
+    matches
+  };
+}
+
+async function calendar(env) {
+  const y =
+    new Date().getUTCFullYear();
+
+  const [a, w] =
+    await Promise.all([
+      call(
+        `/tennis/v2/atp/tournament/calendar/${y}?pageNo=1&pageSize=200`,
+        env
+      ),
+      call(
+        `/tennis/v2/wta/tournament/calendar/${y}?pageNo=1&pageSize=200`,
+        env
+      )
+    ]);
+
+  return {
+    year: y,
+    tournaments: [
+      ...arr(a).map(x =>
+        masters(x, "atp")
+      ),
+      ...arr(w).map(x =>
+        masters(x, "wta")
+      )
+    ]
+      .filter(
+        x =>
+          x.isMasters &&
+          x.start
+      )
+      .sort(
+        (a, b) =>
+          new Date(a.start) -
+          new Date(b.start)
+      )
+  };
+}
+
+function xml(xmlText, source) {
+  return [
+    ...xmlText.matchAll(
+      /<item\b[\s\S]*?<\/item>/gi
+    )
+  ]
+    .map(m => m[0])
+    .map(item => {
+      const clean = s =>
+        s
+          .replace(
+            /<!\[CDATA\[([\s\S]*?)\]\]>/g,
+            "$1"
+          )
+          .replace(/<[^>]+>/g, "")
+          .replace(/&amp;/g, "&")
+          .replace(/&quot;/g, '"');
+
+      const get = tag => {
+        const m = item.match(
+          new RegExp(
+            `<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`,
+            "i"
+          )
+        );
+
+        return m
+          ? clean(m[1]).trim()
+          : "";
+      };
+
+      const link =
+        (
+          item.match(
+            /<link>([\s\S]*?)<\/link>/i
+          ) || []
+        )[1] || "";
+
+      const date =
+        get("pubDate") ||
+        get("published");
+
+      return {
+        title: get("title"),
+        link: clean(link),
+        source,
+        dateLabel: date
+          ? new Date(date).toLocaleDateString(
+              "en-GB",
+              {
+                day: "numeric",
+                month: "short"
+              }
+            )
+          : ""
+      };
+    })
+    .filter(
+      x =>
+        x.title &&
+        x.link
+    );
+}
+
+async function news() {
+  const urls = [
+    [
+      "https://feeds.bbci.co.uk/sport/tennis/rss.xml",
+      "BBC Sport"
+    ],
+    [
+      "https://www.atptour.com/en/media/rss-feed/xml-feed",
+      "ATP Tour"
+    ]
+  ];
+
+  const out = [];
+
+  for (const [url, source] of urls) {
+    try {
+      const r = await fetch(url, {
+        headers: {
+          "User-Agent": "YepTennis/1.0"
+        }
+      });
+
+      if (r.ok) {
+        out.push(
+          ...xml(
+            await r.text(),
+            source
+          )
+        );
+      }
+    } catch {}
+  }
+
+  return {
+    items: out
+  };
+}
+
+export default {
+  async fetch(req, env) {
+    const u = new URL(req.url);
+
+    try {
+      if (u.pathname === "/api/today") {
+        return J(
+          await today(env)
+        );
+      }
+
+      if (u.pathname === "/api/calendar") {
+        return J(
+          await calendar(env)
+        );
+      }
+
+      if (u.pathname === "/api/rankings") {
+        const tour =
+          u.searchParams.get("tour") === "wta"
+            ? "wta"
+            : "atp";
+
+        const d = await call(
+          `/tennis/v2/${tour}/ranking/singles?pageNo=1&pageSize=50`,
+          env
+        );
+
+        return J({
+          players: arr(d).map(
+            (p, i) => ({
+              ...player(p),
+              rank:
+                player(p).rank ||
+                i + 1
+            })
+          )
+        });
+      }
+
+      if (u.pathname === "/api/news") {
+        return J(
+          await news()
+        );
+      }
+
+      if (u.pathname.startsWith("/api/")) {
+        return J(
+          {
+            error:
+              "API endpoint not found"
+          },
+          404
+        );
+      }
+
+      return env.ASSETS.fetch(req);
+
+    } catch (e) {
+      return J(
+        {
+          error:
+            e.message ||
+            "API error"
+        },
+        500
+      );
+    }
+  }
+};
