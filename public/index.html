@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>YepTennis — ATP & WTA Tennis</title>
+<meta name="description" content="YepTennis — ATP and WTA tennis results, Grand Slams, Finals, 1000s, 500s and latest tennis news.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="header-inner">
+    <a href="#home" class="brand"><span class="brand-mark">Y</span><span class="brand-text">Yep<span>Tennis</span></span></a>
+    <nav class="desktop-nav"><a href="#home" class="active">Home</a><a href="#atp">ATP</a><a href="#wta">WTA</a><a href="#results">Results</a><a href="#news">News</a></nav>
+    <button class="menu" type="button" aria-label="Open menu" aria-expanded="false">☰</button>
+  </div>
+  <nav class="mobile-nav"><a href="#home">Home</a><a href="#atp">ATP</a><a href="#wta">WTA</a><a href="#results">Results</a><a href="#news">News</a></nav>
+</header>
+
+<main id="home">
+<section class="hero"><div class="hero-overlay"></div><div class="hero-content">
+  <div class="hero-label">ATP · WTA · TENNIS</div>
+  <h1>The world of <strong>professional tennis.</strong></h1>
+  <p>Follow the biggest tournaments, live results and the latest tennis news.</p>
+  <div class="hero-buttons"><a href="#atp" class="hero-button">Explore ATP</a><a href="#wta" class="hero-button secondary">Explore WTA</a></div>
+</div></section>
+
+<section class="section categories-section">
+  <div class="section-heading"><div><span class="eyebrow">THE TOUR</span><h2>Follow the biggest tournaments</h2></div><p>Grand Slams · Finals · 1000 · 500</p></div>
+  <div class="competition-grid">
+    <a href="#slams" class="competition-card"><div class="card-image slam-image"></div><div class="competition-shade"></div><div class="competition-number">01</div><div class="competition-content"><span>ATP · WTA</span><h3>Grand Slams</h3><p>Australian Open · Roland-Garros · Wimbledon · US Open</p></div><div class="competition-arrow">↗</div></a>
+    <a href="#finals" class="competition-card"><div class="card-image finals-image"></div><div class="competition-shade"></div><div class="competition-number">02</div><div class="competition-content"><span>ATP · WTA</span><h3>Finals</h3><p>ATP Finals and WTA Finals</p></div><div class="competition-arrow">↗</div></a>
+    <a href="#1000" class="competition-card"><div class="card-image masters-image"></div><div class="competition-shade"></div><div class="competition-number">03</div><div class="competition-content"><span>ATP · WTA</span><h3>1000</h3><p>ATP Masters 1000 · WTA 1000</p></div><div class="competition-arrow">↗</div></a>
+    <a href="#500" class="competition-card"><div class="card-image five-hundred-image"></div><div class="competition-shade"></div><div class="competition-number">04</div><div class="competition-content"><span>ATP · WTA</span><h3>500</h3><p>ATP 500 · WTA 500</p></div><div class="competition-arrow">↗</div></a>
+  </div>
+</section>
+
+<section id="atp" class="section tour-section"><div class="section-heading"><div><span class="eyebrow">MEN'S TOUR</span><h2>ATP</h2></div><a href="#results" class="section-link">Today's results <span>→</span></a></div>
+<div class="tour-category-grid">
+<a href="#slams" class="tour-category"><span>GRAND SLAMS</span><strong>The four majors</strong><small>Australian Open · Roland-Garros · Wimbledon · US Open</small></a>
+<a href="#finals" class="tour-category"><span>FINALS</span><strong>ATP Finals</strong><small>The season-ending men's championship</small></a>
+<a href="#1000" class="tour-category"><span>MASTERS 1000</span><strong>ATP Masters 1000</strong><small>The premier tournaments below the Grand Slams</small></a>
+<a href="#500" class="tour-category"><span>ATP 500</span><strong>ATP 500</strong><small>Major tournaments across the ATP Tour</small></a>
+</div></section>
+
+<section id="wta" class="section tour-section"><div class="section-heading"><div><span class="eyebrow">WOMEN'S TOUR</span><h2>WTA</h2></div><a href="#results" class="section-link">Today's results <span>→</span></a></div>
+<div class="tour-category-grid">
+<a href="#slams" class="tour-category"><span>GRAND SLAMS</span><strong>The four majors</strong><small>Australian Open · Roland-Garros · Wimbledon · US Open</small></a>
+<a href="#finals" class="tour-category"><span>FINALS</span><strong>WTA Finals</strong><small>The season-ending women's championship</small></a>
+<a href="#1000" class="tour-category"><span>WTA 1000</span><strong>WTA 1000</strong><small>The major 1000-level tournaments</small></a>
+<a href="#500" class="tour-category"><span>WTA 500</span><strong>WTA 500</strong><small>Major tournaments across the WTA Tour</small></a>
+</div></section>
+
+<section id="results" class="section results-section"><div class="section-heading results-heading"><div><span class="eyebrow">LIVE & RECENT</span><h2>Today's Results</h2></div><span class="api-date"></span></div>
+<div class="results-card"><div class="tabs" id="results-tabs"><button class="selected" data-filter="all" type="button">ALL</button><button data-filter="atp" type="button">ATP</button><button data-filter="wta" type="button">WTA</button><button data-filter="live" type="button">LIVE</button><button data-filter="completed" type="button">COMPLETED</button></div><div id="results-list"><div class="loading">Loading today's results...</div></div></div>
+<a href="#results" class="results-more">View all results <span>→</span></a></section>
+
+<section id="slams" class="section major-section"><div class="section-heading"><div><span class="eyebrow">THE FOUR MAJORS</span><h2>Grand Slams</h2></div></div>
+<div class="slam-grid"><article class="slam-card"><div class="slam-top"><span>JANUARY</span><b>AO</b></div><div><h3>Australian Open</h3><p>Melbourne</p></div></article><article class="slam-card"><div class="slam-top"><span>MAY / JUNE</span><b>RG</b></div><div><h3>Roland-Garros</h3><p>Paris</p></div></article><article class="slam-card"><div class="slam-top"><span>JUNE / JULY</span><b>W</b></div><div><h3>Wimbledon</h3><p>London</p></div></article><article class="slam-card"><div class="slam-top"><span>AUG / SEPT</span><b>US</b></div><div><h3>US Open</h3><p>New York</p></div></article></div></section>
+
+<section id="finals" class="section compact-section"><div class="section-heading"><div><span class="eyebrow">SEASON FINALE</span><h2>Finals</h2></div></div><div class="simple-category-grid"><article><span>ATP</span><h3>ATP Finals</h3><p>The season-ending men's championship.</p></article><article><span>WTA</span><h3>WTA Finals</h3><p>The season-ending women's championship.</p></article></div></section>
+<section id="1000" class="section compact-section"><div class="section-heading"><div><span class="eyebrow">1000 SERIES</span><h2>1000</h2></div></div><div class="simple-category-grid"><article><span>ATP</span><h3>ATP Masters 1000</h3><p>Follow the major ATP 1000-level tournaments.</p></article><article><span>WTA</span><h3>WTA 1000</h3><p>Follow the major WTA 1000-level tournaments.</p></article></div></section>
+<section id="500" class="section compact-section"><div class="section-heading"><div><span class="eyebrow">500 SERIES</span><h2>500</h2></div></div><div class="simple-category-grid"><article><span>ATP</span><h3>ATP 500</h3><p>Follow the principal ATP 500 tournaments.</p></article><article><span>WTA</span><h3>WTA 500</h3><p>Follow the principal WTA 500 tournaments.</p></article></div></section>
+
+<section id="news" class="section news-section"><div class="section-heading"><div><span class="eyebrow">LATEST</span><h2>Latest Tennis News</h2></div><a href="#news" class="section-link">View all news <span>→</span></a></div><div class="news-list" id="news-list"><div class="loading">Loading latest news...</div></div></section>
+</main>
+
+<footer class="site-footer"><div class="footer-inner"><div><a href="#home" class="footer-brand">Yep<span>Tennis</span></a><p>ATP & WTA tennis.</p></div><div class="footer-links"><a href="#atp">ATP</a><a href="#wta">WTA</a><a href="#results">Results</a><a href="#news">News</a></div><div class="footer-copy">© 2026 YepTennis</div></div></footer>
+<script src="app.js"></script>
+</body>
+</html>
