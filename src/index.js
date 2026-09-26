@@ -1,4 +1,4 @@
-const VERSION = "YepTennis Worker 2026-09-26.1";
+const VERSION = "YepTennis Worker 2026-09-26.2";
 
 const HOST = "tennis-api-atp-wta-itf.p.rapidapi.com";
 const BASE = `https://${HOST}`;
@@ -27,6 +27,7 @@ async function call(path, env) {
   const t = await r.text();
 
   let d;
+
   try {
     d = JSON.parse(t);
   } catch {
@@ -81,21 +82,25 @@ const player = p => {
 
   return {
     id: val(p, ["id", "playerId"], null),
+
     name: val(
       p,
       ["name", "playerName", "fullName"],
       "Player"
     ),
+
     country: val(
       p,
       ["countryAcr", "country", "countryCode"],
       ""
     ),
+
     rank: val(
       p,
       ["currentRank", "rank", "ranking"],
       null
     ),
+
     points: val(
       p,
       ["points", "rankingPoints"],
@@ -130,8 +135,13 @@ function extractScore(x) {
 }
 
 function match(x, tour) {
-  const a = player(x.player1 || x.home);
-  const b = player(x.player2 || x.away);
+  const a = player(
+    x.player1 || x.home
+  );
+
+  const b = player(
+    x.player2 || x.away
+  );
 
   const status = val(
     x,
@@ -141,44 +151,81 @@ function match(x, tour) {
 
   const tournament =
     typeof x.tournament === "object"
-      ? val(x.tournament, ["name"], "")
-      : val(x, ["tournamentName"], "");
+      ? val(
+          x.tournament,
+          ["name"],
+          ""
+        )
+      : val(
+          x,
+          ["tournamentName"],
+          ""
+        );
 
   const round =
     typeof x.round === "object"
-      ? val(x.round, ["name"], "")
-      : val(x, ["round", "roundName"], "");
+      ? val(
+          x.round,
+          ["name"],
+          ""
+        )
+      : val(
+          x,
+          ["round", "roundName"],
+          ""
+        );
 
   const start = val(
     x,
-    ["startTime", "timeGame", "date", "start"],
+    [
+      "startTime",
+      "timeGame",
+      "date",
+      "start"
+    ],
     ""
   );
 
   return {
-    id: val(x, ["id", "matchId"], null),
+    id: val(
+      x,
+      ["id", "matchId"],
+      null
+    ),
+
     tour,
+
     player1: a.name,
     player2: b.name,
+
     player1Id: a.id,
     player2Id: b.id,
+
     country1: a.country,
     country2: b.country,
+
     rank1: a.rank,
     rank2: b.rank,
+
     score: extractScore(x),
+
     status,
+
     live:
       Boolean(x.live) ||
       /live|inplay|in play/i.test(
         String(status)
       ),
+
     tournament,
+
     tournamentId:
       x.tournament?.id ||
       x.tournamentId ||
       null,
+
     round,
+
     start
   };
 }
@@ -201,24 +248,40 @@ function masters(x, tour) {
 
   return {
     name,
+
     tour,
-    tier: tier || rank,
+
+    tier:
+      tier ||
+      rank,
+
     start: val(
       x,
-      ["date", "startDate", "start"]
+      [
+        "date",
+        "startDate",
+        "start"
+      ]
     ),
+
     end: val(
       x,
-      ["endDate", "end"]
+      [
+        "endDate",
+        "end"
+      ]
     ),
+
     country:
       x.country?.name ||
       x.countryName ||
       "",
+
     surface:
       x.court?.name ||
       x.surface ||
       "",
+
     isMasters:
       /masters|1000/i.test(
         `${name} ${tier} ${rank}`
@@ -226,13 +289,24 @@ function masters(x, tour) {
   };
 }
 
+
+/* =====================================================
+   TODAY
+   ===================================================== */
+
 async function today(env) {
+
   const d = new Date()
     .toISOString()
     .slice(0, 10);
 
-  const [a, w, l] =
+  const [
+    a,
+    w,
+    l
+  ] =
     await Promise.allSettled([
+
       call(
         `/tennis/v2/atp/fixtures/${d}?include=round,tournament&pageNo=1&pageSize=100&filter=PlayerGroup:singles`,
         env
@@ -247,67 +321,93 @@ async function today(env) {
         `/tennis/v2/extend/api/events/live`,
         env
       )
+
     ]);
 
   let matches = [];
 
   if (a.status === "fulfilled") {
+
     matches.push(
-      ...arr(a.value).map(x =>
-        match(x, "atp")
+      ...arr(a.value).map(
+        x => match(x, "atp")
       )
     );
+
   }
 
   if (w.status === "fulfilled") {
+
     matches.push(
-      ...arr(w.value).map(x =>
-        match(x, "wta")
+      ...arr(w.value).map(
+        x => match(x, "wta")
       )
     );
+
   }
 
   if (l.status === "fulfilled") {
-    for (const x of arr(l.value)) {
+
+    for (
+      const x of arr(l.value)
+    ) {
+
       const p1 = val(
         x,
-        ["player1", "player1Name"],
+        [
+          "player1",
+          "player1Name"
+        ],
         ""
       );
 
       const p2 = val(
         x,
-        ["player2", "player2Name"],
+        [
+          "player2",
+          "player2Name"
+        ],
         ""
       );
 
-      const found = matches.find(
-        z =>
-          (
-            z.player1 === p1 &&
-            z.player2 === p2
-          ) ||
-          (
-            z.player1 === p2 &&
-            z.player2 === p1
-          )
-      );
-
-      if (found) {
-        found.live = true;
-        found.status = "Live";
-
-        const liveScore = val(
-          x,
-          ["score", "result"],
-          ""
+      const found =
+        matches.find(
+          z =>
+            (
+              z.player1 === p1 &&
+              z.player2 === p2
+            ) ||
+            (
+              z.player1 === p2 &&
+              z.player2 === p1
+            )
         );
 
+      if (found) {
+
+        found.live = true;
+
+        found.status = "Live";
+
+        const liveScore =
+          val(
+            x,
+            [
+              "score",
+              "result"
+            ],
+            ""
+          );
+
         if (liveScore) {
-          found.score = liveScore;
+          found.score =
+            liveScore;
         }
+
       }
+
     }
+
   }
 
   return {
@@ -319,12 +419,120 @@ async function today(env) {
   };
 }
 
-async function calendar(env) {
-  const y =
-    new Date().getUTCFullYear();
 
-  const [a, w] =
+/* =====================================================
+   DEBUG
+   ===================================================== */
+
+async function debug(env) {
+
+  const d = new Date()
+    .toISOString()
+    .slice(0, 10);
+
+  const atpPath =
+    `/tennis/v2/atp/fixtures/${d}?include=round,tournament&pageNo=1&pageSize=100&filter=PlayerGroup:singles`;
+
+  const wtaPath =
+    `/tennis/v2/wta/fixtures/${d}?include=round,tournament&pageNo=1&pageSize=100&filter=PlayerGroup:singles`;
+
+  const [
+    atp,
+    wta
+  ] =
+    await Promise.allSettled([
+
+      call(
+        atpPath,
+        env
+      ),
+
+      call(
+        wtaPath,
+        env
+      )
+
+    ]);
+
+
+  const result = {
+    ok: true,
+
+    version: VERSION,
+
+    date: d,
+
+    atp: {
+      status: atp.status,
+
+      count:
+        atp.status === "fulfilled"
+          ? arr(atp.value).length
+          : 0,
+
+      first:
+        atp.status === "fulfilled"
+          ? (
+              arr(atp.value)[0] ||
+              null
+            )
+          : null,
+
+      error:
+        atp.status === "rejected"
+          ? String(
+              atp.reason?.message ||
+              atp.reason
+            )
+          : null
+    },
+
+    wta: {
+      status: wta.status,
+
+      count:
+        wta.status === "fulfilled"
+          ? arr(wta.value).length
+          : 0,
+
+      first:
+        wta.status === "fulfilled"
+          ? (
+              arr(wta.value)[0] ||
+              null
+            )
+          : null,
+
+      error:
+        wta.status === "rejected"
+          ? String(
+              wta.reason?.message ||
+              wta.reason
+            )
+          : null
+    }
+  };
+
+  return result;
+}
+
+
+/* =====================================================
+   CALENDAR
+   ===================================================== */
+
+async function calendar(env) {
+
+  const y =
+    new Date()
+      .getUTCFullYear();
+
+  const [
+    a,
+    w
+  ] =
     await Promise.all([
+
       call(
         `/tennis/v2/atp/tournament/calendar/${y}?pageNo=1&pageSize=200`,
         env
@@ -334,66 +542,106 @@ async function calendar(env) {
         `/tennis/v2/wta/tournament/calendar/${y}?pageNo=1&pageSize=200`,
         env
       )
+
     ]);
 
   return {
+
     year: y,
 
     tournaments: [
-      ...arr(a).map(x =>
-        masters(x, "atp")
+
+      ...arr(a).map(
+        x => masters(x, "atp")
       ),
 
-      ...arr(w).map(x =>
-        masters(x, "wta")
+      ...arr(w).map(
+        x => masters(x, "wta")
       )
+
     ]
+
       .filter(
         x =>
           x.isMasters &&
           x.start
       )
+
       .sort(
         (a, b) =>
           new Date(a.start) -
           new Date(b.start)
       )
+
   };
 }
 
+
+/* =====================================================
+   RSS NEWS
+   ===================================================== */
+
 function xml(xml, source) {
+
   return [
     ...xml.matchAll(
       /<item\b[\s\S]*?<\/item>/gi
     )
   ]
-    .map(m => m[0])
+
+    .map(
+      m => m[0]
+    )
+
     .map(i => {
 
       const clean = s =>
         s
+
           .replace(
             /<!\[CDATA\[([\s\S]*?)\]\]>/g,
             "$1"
           )
-          .replace(/<[^>]+>/g, "")
-          .replace(/&amp;/g, "&")
-          .replace(/&quot;/g, '"')
-          .replace(/&#39;/g, "'")
+
+          .replace(
+            /<[^>]+>/g,
+            ""
+          )
+
+          .replace(
+            /&amp;/g,
+            "&"
+          )
+
+          .replace(
+            /&quot;/g,
+            '"'
+          )
+
+          .replace(
+            /&#39;/g,
+            "'"
+          )
+
           .trim();
 
+
       const g = t => {
-        const m = i.match(
-          new RegExp(
-            `<${t}[^>]*>([\\s\\S]*?)<\\/${t}>`,
-            "i"
-          )
-        );
+
+        const m =
+          i.match(
+            new RegExp(
+              `<${t}[^>]*>([\\s\\S]*?)<\\/${t}>`,
+              "i"
+            )
+          );
 
         return m
           ? clean(m[1])
           : "";
+
       };
+
 
       let link =
         (
@@ -402,38 +650,55 @@ function xml(xml, source) {
           ) || []
         )[1] || "";
 
+
       let date =
         g("pubDate") ||
         g("published");
 
+
       let image = "";
+
 
       const mediaContent =
         i.match(
           /<media:content[^>]+url=["']([^"']+)["']/i
         );
 
+
       const mediaThumbnail =
         i.match(
           /<media:thumbnail[^>]+url=["']([^"']+)["']/i
         );
+
 
       const enclosure =
         i.match(
           /<enclosure[^>]+url=["']([^"']+)["']/i
         );
 
+
       if (mediaContent) {
-        image = mediaContent[1];
+
+        image =
+          mediaContent[1];
+
       }
       else if (mediaThumbnail) {
-        image = mediaThumbnail[1];
+
+        image =
+          mediaThumbnail[1];
+
       }
       else if (enclosure) {
-        image = enclosure[1];
+
+        image =
+          enclosure[1];
+
       }
 
+
       if (!image) {
+
         const description =
           g("description");
 
@@ -443,29 +708,41 @@ function xml(xml, source) {
           );
 
         if (img) {
-          image = img[1];
+          image =
+            img[1];
         }
+
       }
 
+
       return {
-        title: g("title"),
-        link: clean(link),
+
+        title:
+          g("title"),
+
+        link:
+          clean(link),
+
         source,
 
-        dateLabel: date
-          ? new Date(date)
-              .toLocaleDateString(
-                "en-GB",
-                {
-                  day: "numeric",
-                  month: "short"
-                }
-              )
-          : "",
+        dateLabel:
+          date
+            ? new Date(date)
+                .toLocaleDateString(
+                  "en-GB",
+                  {
+                    day: "numeric",
+                    month: "short"
+                  }
+                )
+            : "",
 
         image
+
       };
+
     })
+
     .filter(
       x =>
         x.title &&
@@ -473,8 +750,11 @@ function xml(xml, source) {
     );
 }
 
+
 async function news() {
+
   const urls = [
+
     [
       "https://feeds.bbci.co.uk/sport/tennis/rss.xml",
       "BBC Sport"
@@ -484,65 +764,117 @@ async function news() {
       "https://www.atptour.com/en/media/rss-feed/xml-feed",
       "ATP Tour"
     ]
+
   ];
+
 
   const out = [];
 
-  for (const [url, source] of urls) {
+
+  for (
+    const [url, source]
+    of urls
+  ) {
+
     try {
-      const r = await fetch(
-        url,
-        {
-          headers: {
-            "User-Agent":
-              "YepTennis/1.0"
+
+      const r =
+        await fetch(
+          url,
+          {
+            headers: {
+              "User-Agent":
+                "YepTennis/1.0"
+            }
           }
-        }
-      );
+        );
+
 
       if (r.ok) {
+
         out.push(
           ...xml(
             await r.text(),
             source
           )
         );
+
       }
+
     }
     catch {}
+
   }
+
 
   return {
     items: out
   };
+
 }
 
+
+/* =====================================================
+   WORKER
+   ===================================================== */
+
 export default {
+
   async fetch(req, env) {
+
     const u =
       new URL(req.url);
 
+
     try {
 
-      /* HEALTH CHECK */
+      /* HEALTH */
 
       if (
         u.pathname ===
         "/api/health"
       ) {
+
         return J({
+
           ok: true,
-          service: "YepTennis",
-          version: VERSION,
+
+          service:
+            "YepTennis",
+
+          version:
+            VERSION,
+
           apiConfigured:
             Boolean(
               env.TENNIS_API_KEY
             ),
-          host: HOST,
+
+          host:
+            HOST,
+
           time:
-            new Date().toISOString()
+            new Date()
+              .toISOString()
+
         });
+
       }
+
+
+      /* DEBUG */
+
+      if (
+        u.pathname ===
+        "/api/debug"
+      ) {
+
+        return J(
+          await debug(env)
+        );
+
+      }
+
 
       /* TODAY */
 
@@ -550,10 +882,13 @@ export default {
         u.pathname ===
         "/api/today"
       ) {
+
         return J(
           await today(env)
         );
+
       }
+
 
       /* CALENDAR */
 
@@ -561,10 +896,13 @@ export default {
         u.pathname ===
         "/api/calendar"
       ) {
+
         return J(
           await calendar(env)
         );
+
       }
+
 
       /* RANKINGS */
 
@@ -580,25 +918,33 @@ export default {
             ? "wta"
             : "atp";
 
+
         const d =
           await call(
             `/tennis/v2/${tour}/ranking/singles?pageNo=1&pageSize=50`,
             env
           );
 
+
         return J({
+
           players:
             arr(d).map(
               (p, i) => ({
+
                 ...player(p),
 
                 rank:
                   player(p).rank ||
                   i + 1
+
               })
             )
+
         });
+
       }
+
 
       /* NEWS */
 
@@ -606,10 +952,13 @@ export default {
         u.pathname ===
         "/api/news"
       ) {
+
         return J(
           await news()
         );
+
       }
+
 
       /* UNKNOWN API */
 
@@ -618,34 +967,54 @@ export default {
           "/api/"
         )
       ) {
+
         return J(
           {
+
             error:
               "API endpoint not found",
-            version: VERSION,
-            path: u.pathname
+
+            version:
+              VERSION,
+
+            path:
+              u.pathname
+
           },
           404
         );
+
       }
+
 
       /* WEBSITE */
 
       return env.ASSETS.fetch(req);
 
     }
+
+
     catch (e) {
 
       return J(
+
         {
+
           error:
             e.message ||
             "API error",
 
-          version: VERSION
+          version:
+            VERSION
+
         },
+
         500
+
       );
+
     }
+
   }
+
 };
