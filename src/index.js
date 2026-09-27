@@ -1,18 +1,27 @@
 /* ============================================================
    YepTennis Worker
-   Version: 2026-09-27.11
+   Version: 2026-09-27.12
 
-   Architecture:
+   Architecture
+   ------------------------------------------------------------
    - RapidAPI is used ONLY by scheduled refreshes.
-   - Visitors read data from KV.
-   - ATP + WTA fixtures/results are cached.
-   - ATP + WTA rankings are cached.
-   - ATP + WTA calendar is cached.
-   - BBC Tennis news is cached in KV.
-   - Six scheduled refreshes per day.
+   - Website visitors read KV only.
+   - Every scheduled run refreshes:
+       ATP today
+       WTA today
+       ATP live
+       WTA live
+       ATP yesterday
+       WTA yesterday
+       ATP rankings
+       WTA rankings
+       ATP calendar
+       WTA calendar
+       BBC Tennis news
+   - Six scheduled runs per day.
    ============================================================ */
 
-const VERSION = "YepTennis Worker 2026-09-27.11";
+const VERSION = "YepTennis Worker 2026-09-27.12";
 
 const RAPIDAPI_HOST =
   "tennis-api-atp-wta-itf.p.rapidapi.com";
@@ -22,51 +31,86 @@ const BBC_TENNIS_RSS =
 
 
 /* ============================================================
-   BASIC HELPERS
+   DATE HELPERS
    ============================================================ */
 
-function todayUTC() {
-  return new Date().toISOString().slice(0, 10);
+function utcDate(offset = 0) {
+  const d = new Date();
+
+  d.setUTCDate(
+    d.getUTCDate() + offset
+  );
+
+  return d
+    .toISOString()
+    .slice(0, 10);
 }
 
-function dateUTC(daysOffset = 0) {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + daysOffset);
-  return d.toISOString().slice(0, 10);
-}
+
+/* ============================================================
+   GENERAL HELPERS
+   ============================================================ */
 
 function arr(value) {
-  if (Array.isArray(value)) return value;
 
-  if (value && Array.isArray(value.data)) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (
+    value &&
+    Array.isArray(value.data)
+  ) {
     return value.data;
   }
 
-  if (value && Array.isArray(value.results)) {
+  if (
+    value &&
+    Array.isArray(value.results)
+  ) {
     return value.results;
   }
 
-  if (value && Array.isArray(value.items)) {
+  if (
+    value &&
+    Array.isArray(value.items)
+  ) {
     return value.items;
   }
 
-  if (value && Array.isArray(value.matches)) {
+  if (
+    value &&
+    Array.isArray(value.matches)
+  ) {
     return value.matches;
   }
 
-  if (value && Array.isArray(value.fixtures)) {
+  if (
+    value &&
+    Array.isArray(value.fixtures)
+  ) {
     return value.fixtures;
   }
 
   return [];
 }
 
-function val(obj, keys, fallback = null) {
-  if (!obj || typeof obj !== "object") {
+
+function val(
+  obj,
+  keys,
+  fallback = null
+) {
+
+  if (
+    !obj ||
+    typeof obj !== "object"
+  ) {
     return fallback;
   }
 
   for (const key of keys) {
+
     if (
       obj[key] !== undefined &&
       obj[key] !== null &&
@@ -81,37 +125,65 @@ function val(obj, keys, fallback = null) {
 
 
 /* ============================================================
-   KV HELPERS
+   KV
    ============================================================ */
 
-async function getCache(env, key) {
+async function getCache(
+  env,
+  key
+) {
+
   if (!env.TENNIS_CACHE) {
     return null;
   }
 
   try {
-    const value = await env.TENNIS_CACHE.get(key, "json");
-    return value || null;
+
+    return await env.TENNIS_CACHE.get(
+      key,
+      "json"
+    );
+
   } catch (error) {
-    console.log("KV GET ERROR", key, error?.message);
+
+    console.log(
+      "KV GET ERROR",
+      key,
+      error?.message
+    );
+
     return null;
   }
 }
 
-async function putCache(env, key, value) {
+
+async function putCache(
+  env,
+  key,
+  value
+) {
+
   if (!env.TENNIS_CACHE) {
     return false;
   }
 
   try {
+
     await env.TENNIS_CACHE.put(
       key,
       JSON.stringify(value)
     );
 
     return true;
+
   } catch (error) {
-    console.log("KV PUT ERROR", key, error?.message);
+
+    console.log(
+      "KV PUT ERROR",
+      key,
+      error?.message
+    );
+
     return false;
   }
 }
@@ -121,33 +193,51 @@ async function putCache(env, key, value) {
    RAPIDAPI
    ============================================================ */
 
-async function callRapidAPI(path, env) {
+async function rapidAPI(
+  env,
+  path
+) {
+
   if (!env.TENNIS_API_KEY) {
-    throw new Error("Missing TENNIS_API_KEY");
+    throw new Error(
+      "Missing TENNIS_API_KEY"
+    );
   }
 
   const url =
     `https://${RAPIDAPI_HOST}${path}`;
 
-  const response = await fetch(url, {
-    method: "GET",
-    headers: {
-      "x-rapidapi-key": env.TENNIS_API_KEY,
-      "x-rapidapi-host": RAPIDAPI_HOST
-    }
-  });
+  const response =
+    await fetch(
+      url,
+      {
+        method: "GET",
+        headers: {
+          "x-rapidapi-key":
+            env.TENNIS_API_KEY,
 
-  const text = await response.text();
+          "x-rapidapi-host":
+            RAPIDAPI_HOST
+        }
+      }
+    );
+
+  const text =
+    await response.text();
 
   if (!response.ok) {
+
     throw new Error(
       `RapidAPI ${response.status}: ${text.slice(0, 500)}`
     );
   }
 
   try {
+
     return JSON.parse(text);
+
   } catch {
+
     throw new Error(
       "RapidAPI returned invalid JSON"
     );
@@ -159,8 +249,13 @@ async function callRapidAPI(path, env) {
    PLAYER PARSER
    ============================================================ */
 
-function parsePlayer(p) {
-  if (!p || typeof p !== "object") {
+function parsePlayer(value) {
+
+  if (
+    !value ||
+    typeof value !== "object"
+  ) {
+
     return {
       id: null,
       name: "Player",
@@ -170,127 +265,84 @@ function parsePlayer(p) {
     };
   }
 
-  /*
-     IMPORTANT:
-
-     Ranking rows from Matchstat contain:
-
-       {
-         id: snapshot row ID,
-         position: 1,
-         rankingPoints: 11500,
-         player: {
-           id: ...,
-           name: ...,
-           countryAcr: ...
-         }
-       }
-
-     Therefore we must NOT use the row "id"
-     as the player ID.
-  */
-
-  const nested =
-    p.player ||
-    p.Player ||
-    p.athlete ||
-    {};
-
-  const playerId =
-    val(
-      nested,
-      [
-        "id",
-        "playerId",
-        "playerID"
-      ],
-      null
-    );
-
-  const name =
-    val(
-      nested,
-      [
-        "name",
-        "fullName",
-        "playerName",
-        "displayName"
-      ],
-      null
-    ) ||
-    val(
-      p,
-      [
-        "name",
-        "fullName",
-        "playerName",
-        "displayName"
-      ],
-      "Player"
-    );
-
-  const country =
-    val(
-      nested,
-      [
-        "countryAcr",
-        "country",
-        "countryCode",
-        "countryCodeAcr"
-      ],
-      ""
-    ) ||
-    val(
-      p,
-      [
-        "countryAcr",
-        "country",
-        "countryCode",
-        "countryCodeAcr"
-      ],
-      ""
-    );
-
-  const rank =
-    val(
-      p,
-      [
-        "position",
-        "rank",
-        "ranking",
-        "currentRank"
-      ],
-      null
-    );
-
-  const points =
-    val(
-      p,
-      [
-        "rankingPoints",
-        "point",
-        "points",
-        "pointsCurrent"
-      ],
-      0
-    );
+  const p =
+    value.player ||
+    value.Player ||
+    value.athlete ||
+    value;
 
   return {
-    id: playerId,
-    name,
-    country,
-    rank,
-    points
+
+    id:
+      val(
+        p,
+        [
+          "id",
+          "playerId",
+          "playerID"
+        ],
+        null
+      ),
+
+    name:
+      val(
+        p,
+        [
+          "name",
+          "fullName",
+          "playerName",
+          "displayName"
+        ],
+        "Player"
+      ),
+
+    country:
+      val(
+        p,
+        [
+          "countryAcr",
+          "country",
+          "countryCode",
+          "countryCodeAcr"
+        ],
+        ""
+      ),
+
+    rank:
+      val(
+        value,
+        [
+          "position",
+          "rank",
+          "ranking",
+          "currentRank"
+        ],
+        null
+      ),
+
+    points:
+      val(
+        value,
+        [
+          "rankingPoints",
+          "point",
+          "points",
+          "pointsCurrent"
+        ],
+        0
+      )
   };
 }
 
 
 /* ============================================================
-   MATCH PLAYER PARSER
+   MATCH PLAYER
    ============================================================ */
 
 function matchPlayer(value) {
+
   if (!value) {
+
     return {
       id: null,
       name: "Player",
@@ -298,7 +350,10 @@ function matchPlayer(value) {
     };
   }
 
-  if (typeof value === "string") {
+  if (
+    typeof value === "string"
+  ) {
+
     return {
       id: null,
       name: value,
@@ -306,94 +361,102 @@ function matchPlayer(value) {
     };
   }
 
-  const nested =
+  const p =
     value.player ||
     value.Player ||
     value.athlete ||
     value;
 
   return {
-    id: val(
-      nested,
-      [
-        "id",
-        "playerId",
-        "playerID"
-      ],
-      null
-    ),
 
-    name: val(
-      nested,
-      [
-        "name",
-        "playerName",
-        "fullName",
-        "displayName"
-      ],
-      "Player"
-    ),
+    id:
+      val(
+        p,
+        [
+          "id",
+          "playerId",
+          "playerID"
+        ],
+        null
+      ),
 
-    country: val(
-      nested,
-      [
-        "countryAcr",
-        "country",
-        "countryCode",
-        "countryCodeAcr"
-      ],
-      ""
-    )
+    name:
+      val(
+        p,
+        [
+          "name",
+          "playerName",
+          "fullName",
+          "displayName"
+        ],
+        "Player"
+      ),
+
+    country:
+      val(
+        p,
+        [
+          "countryAcr",
+          "country",
+          "countryCode",
+          "countryCodeAcr"
+        ],
+        ""
+      )
   };
 }
 
 
 /* ============================================================
-   SCORE PARSER
+   SCORE
    ============================================================ */
 
 function extractScore(m) {
+
   const score =
-    m.score ||
-    m.Score ||
+    m?.score ||
+    m?.Score ||
     {};
 
   return {
-    home: val(
-      score,
-      [
-        "home",
-        "homeScore",
-        "player1",
-        "player1Score"
-      ],
+
+    home:
       val(
-        m,
+        score,
         [
+          "home",
           "homeScore",
+          "player1",
           "player1Score"
         ],
-        null
-      )
-    ),
+        val(
+          m,
+          [
+            "homeScore",
+            "player1Score"
+          ],
+          null
+        )
+      ),
 
-    away: val(
-      score,
-      [
-        "away",
-        "awayScore",
-        "player2",
-        "player2Score"
-      ],
+    away:
       val(
-        m,
+        score,
         [
+          "away",
           "awayScore",
+          "player2",
           "player2Score"
         ],
-        null
-      )
-    ),
+        val(
+          m,
+          [
+            "awayScore",
+            "player2Score"
+          ],
+          null
+        )
+      ),
 
     sets:
       score.sets ||
@@ -408,12 +471,19 @@ function extractScore(m) {
    MATCH NORMALISATION
    ============================================================ */
 
-function normaliseMatch(raw, tour) {
-  if (!raw || typeof raw !== "object") {
+function normaliseMatch(
+  raw,
+  tour
+) {
+
+  if (
+    !raw ||
+    typeof raw !== "object"
+  ) {
     return null;
   }
 
-  const home =
+  const p1 =
     raw.homePlayer ||
     raw.player1 ||
     raw.playerA ||
@@ -421,16 +491,13 @@ function normaliseMatch(raw, tour) {
     raw.home ||
     raw.player1Data;
 
-  const away =
+  const p2 =
     raw.awayPlayer ||
     raw.player2 ||
     raw.playerB ||
     raw.playerTwo ||
     raw.away ||
     raw.player2Data;
-
-  const p1 = matchPlayer(home);
-  const p2 = matchPlayer(away);
 
   const tournament =
     raw.tournament ||
@@ -442,132 +509,145 @@ function normaliseMatch(raw, tour) {
     raw.Round ||
     {};
 
-  const score = extractScore(raw);
-
   return {
-    id: val(
-      raw,
-      [
-        "id",
-        "matchId",
-        "fixtureId"
-      ],
-      null
-    ),
 
-    tour: String(tour).toUpperCase(),
-
-    date: val(
-      raw,
-      [
-        "date",
-        "matchDate",
-        "startDate",
-        "startTime",
-        "start"
-      ],
-      null
-    ),
-
-    status: val(
-      raw,
-      [
-        "status",
-        "matchStatus",
-        "state"
-      ],
-      ""
-    ),
-
-    statusLong: val(
-      raw,
-      [
-        "statusLong",
-        "statusName"
-      ],
-      ""
-    ),
-
-    player1: p1,
-    player2: p2,
-
-    tournament: {
-      id: val(
-        tournament,
+    id:
+      val(
+        raw,
         [
           "id",
-          "tournamentId"
+          "matchId",
+          "fixtureId"
         ],
-        val(
-          raw,
-          [
-            "tournamentId"
-          ],
-          null
-        )
+        null
       ),
 
-      name: val(
-        tournament,
+    tour:
+      String(tour).toUpperCase(),
+
+    date:
+      val(
+        raw,
         [
-          "name",
-          "tournamentName"
+          "date",
+          "matchDate",
+          "startDate",
+          "startTime",
+          "start"
         ],
-        val(
-          raw,
-          [
-            "tournamentName"
-          ],
-          "Tournament"
-        )
+        null
       ),
 
-      country: val(
-        tournament,
+    status:
+      val(
+        raw,
         [
-          "country",
-          "countryAcr",
-          "countryCode"
+          "status",
+          "matchStatus",
+          "state"
         ],
         ""
-      )
-    },
-
-    round: {
-      id: val(
-        round,
-        [
-          "id",
-          "roundId"
-        ],
-        val(
-          raw,
-          [
-            "roundId"
-          ],
-          null
-        )
       ),
 
-      name: val(
-        round,
+    statusLong:
+      val(
+        raw,
         [
-          "name",
-          "roundName"
+          "statusLong",
+          "statusName"
         ],
+        ""
+      ),
+
+    player1:
+      matchPlayer(p1),
+
+    player2:
+      matchPlayer(p2),
+
+    tournament: {
+
+      id:
         val(
-          raw,
+          tournament,
           [
-            "roundName"
+            "id",
+            "tournamentId"
+          ],
+          val(
+            raw,
+            [
+              "tournamentId"
+            ],
+            null
+          )
+        ),
+
+      name:
+        val(
+          tournament,
+          [
+            "name",
+            "tournamentName"
+          ],
+          val(
+            raw,
+            [
+              "tournamentName"
+            ],
+            "Tournament"
+          )
+        ),
+
+      country:
+        val(
+          tournament,
+          [
+            "country",
+            "countryAcr",
+            "countryCode"
           ],
           ""
         )
-      )
     },
 
-    score,
+    round: {
 
-    raw
+      id:
+        val(
+          round,
+          [
+            "id",
+            "roundId"
+          ],
+          val(
+            raw,
+            [
+              "roundId"
+            ],
+            null
+          )
+        ),
+
+      name:
+        val(
+          round,
+          [
+            "name",
+            "roundName"
+          ],
+          val(
+            raw,
+            [
+              "roundName"
+            ],
+            ""
+          )
+        )
+    },
+
+    score:
+      extractScore(raw)
   };
 }
 
@@ -576,25 +656,30 @@ function normaliseMatch(raw, tour) {
    FIXTURES
    ============================================================ */
 
-async function fetchFixtures(env, tour, date) {
-  /*
-     Correct Matchstat syntax:
-
-     filter=PlayerGroup:singles
-
-     NOT:
-     ?PlayerGroup=singles
-  */
+async function fetchFixtures(
+  env,
+  tour,
+  date
+) {
 
   const path =
     `/tennis/v2/${tour}/fixtures/${date}` +
     `?filter=PlayerGroup:singles&pageNo=1&pageSize=200`;
 
   const data =
-    await callRapidAPI(path, env);
+    await rapidAPI(
+      env,
+      path
+    );
 
   return arr(data)
-    .map(m => normaliseMatch(m, tour))
+    .map(
+      m =>
+        normaliseMatch(
+          m,
+          tour
+        )
+    )
     .filter(Boolean);
 }
 
@@ -603,28 +688,30 @@ async function fetchFixtures(env, tour, date) {
    RESULTS
    ============================================================ */
 
-async function fetchResults(env, tour, date) {
-  /*
-     Results endpoint requires a DATE RANGE.
-
-     Correct:
-
-       /results/2026-09-26/2026-09-26
-
-     Not:
-
-       /results/2026-09-26
-  */
+async function fetchResults(
+  env,
+  tour,
+  date
+) {
 
   const path =
     `/tennis/v2/${tour}/results/${date}/${date}` +
     `?filter=PlayerGroup:singles&pageNo=1&pageSize=200`;
 
   const data =
-    await callRapidAPI(path, env);
+    await rapidAPI(
+      env,
+      path
+    );
 
   return arr(data)
-    .map(m => normaliseMatch(m, tour))
+    .map(
+      m =>
+        normaliseMatch(
+          m,
+          tour
+        )
+    )
     .filter(Boolean);
 }
 
@@ -633,52 +720,99 @@ async function fetchResults(env, tour, date) {
    LIVE
    ============================================================ */
 
-async function fetchLive(env, tour) {
+async function fetchLive(
+  env,
+  tour
+) {
+
   const path =
     `/tennis/v2/${tour}/fixtures/live` +
     `?filter=PlayerGroup:singles&pageNo=1&pageSize=200`;
 
   const data =
-    await callRapidAPI(path, env);
+    await rapidAPI(
+      env,
+      path
+    );
 
   return arr(data)
-    .map(m => normaliseMatch(m, tour))
+    .map(
+      m =>
+        normaliseMatch(
+          m,
+          tour
+        )
+    )
     .filter(Boolean);
 }
 
 
 /* ============================================================
-   REFRESH TODAY
+   TODAY CACHE
    ============================================================ */
 
-async function refreshToday(env, date) {
-  const [atpResult, wtaResult] =
+async function refreshToday(
+  env,
+  date
+) {
+
+  const results =
     await Promise.allSettled([
-      fetchFixtures(env, "atp", date),
-      fetchFixtures(env, "wta", date)
+
+      fetchFixtures(
+        env,
+        "atp",
+        date
+      ),
+
+      fetchFixtures(
+        env,
+        "wta",
+        date
+      )
     ]);
 
   const atp =
-    atpResult.status === "fulfilled"
-      ? atpResult.value
+    results[0].status === "fulfilled"
+      ? results[0].value
       : [];
 
   const wta =
-    wtaResult.status === "fulfilled"
-      ? wtaResult.value
+    results[1].status === "fulfilled"
+      ? results[1].value
       : [];
 
+  const updated =
+    new Date().toISOString();
+
   const payload = {
+
     ok: true,
+
     version: VERSION,
+
     date,
+
     atp,
+
     wta,
-    matches: [...atp, ...wta],
-    count: atp.length + wta.length,
-    atpCount: atp.length,
-    wtaCount: wta.length,
-    updated: new Date().toISOString()
+
+    matches: [
+      ...atp,
+      ...wta
+    ],
+
+    count:
+      atp.length +
+      wta.length,
+
+    atpCount:
+      atp.length,
+
+    wtaCount:
+      wta.length,
+
+    updated
   };
 
   await putCache(
@@ -692,37 +826,71 @@ async function refreshToday(env, date) {
 
 
 /* ============================================================
-   REFRESH YESTERDAY
+   YESTERDAY CACHE
    ============================================================ */
 
-async function refreshYesterday(env, date) {
-  const [atpResult, wtaResult] =
+async function refreshYesterday(
+  env,
+  date
+) {
+
+  const results =
     await Promise.allSettled([
-      fetchResults(env, "atp", date),
-      fetchResults(env, "wta", date)
+
+      fetchResults(
+        env,
+        "atp",
+        date
+      ),
+
+      fetchResults(
+        env,
+        "wta",
+        date
+      )
     ]);
 
   const atp =
-    atpResult.status === "fulfilled"
-      ? atpResult.value
+    results[0].status === "fulfilled"
+      ? results[0].value
       : [];
 
   const wta =
-    wtaResult.status === "fulfilled"
-      ? wtaResult.value
+    results[1].status === "fulfilled"
+      ? results[1].value
       : [];
 
+  const updated =
+    new Date().toISOString();
+
   const payload = {
+
     ok: true,
+
     version: VERSION,
+
     date,
+
     atp,
+
     wta,
-    matches: [...atp, ...wta],
-    count: atp.length + wta.length,
-    atpCount: atp.length,
-    wtaCount: wta.length,
-    updated: new Date().toISOString()
+
+    matches: [
+      ...atp,
+      ...wta
+    ],
+
+    count:
+      atp.length +
+      wta.length,
+
+    atpCount:
+      atp.length,
+
+    wtaCount:
+      wta.length,
+
+    updated
   };
 
   await putCache(
@@ -736,37 +904,66 @@ async function refreshYesterday(env, date) {
 
 
 /* ============================================================
-   REFRESH LIVE
+   LIVE CACHE
    ============================================================ */
 
-async function refreshLive(env, date) {
-  const [atpResult, wtaResult] =
+async function refreshLive(
+  env,
+  date
+) {
+
+  const results =
     await Promise.allSettled([
-      fetchLive(env, "atp"),
-      fetchLive(env, "wta")
+
+      fetchLive(
+        env,
+        "atp"
+      ),
+
+      fetchLive(
+        env,
+        "wta"
+      )
     ]);
 
   const atp =
-    atpResult.status === "fulfilled"
-      ? atpResult.value
+    results[0].status === "fulfilled"
+      ? results[0].value
       : [];
 
   const wta =
-    wtaResult.status === "fulfilled"
-      ? wtaResult.value
+    results[1].status === "fulfilled"
+      ? results[1].value
       : [];
 
-  const live = [...atp, ...wta];
+  const live = [
+    ...atp,
+    ...wta
+  ];
+
+  const updated =
+    new Date().toISOString();
 
   const payload = {
+
     ok: true,
+
     version: VERSION,
+
     date,
+
     live,
-    count: live.length,
-    atpCount: atp.length,
-    wtaCount: wta.length,
-    updated: new Date().toISOString()
+
+    count:
+      live.length,
+
+    atpCount:
+      atp.length,
+
+    wtaCount:
+      wta.length,
+
+    updated
   };
 
   await putCache(
@@ -783,55 +980,75 @@ async function refreshLive(env, date) {
    RANKINGS
    ============================================================ */
 
-async function fetchRankings(env, tour) {
+async function fetchRankings(
+  env,
+  tour
+) {
+
   const path =
     `/tennis/v2/${tour}/ranking/singles` +
     `?pageNo=1&pageSize=50`;
 
   const data =
-    await callRapidAPI(path, env);
+    await rapidAPI(
+      env,
+      path
+    );
 
-  const rows = arr(data);
+  const rows =
+    arr(data);
 
-  const players = rows.map(
+  return rows.map(
     (row, index) => {
+
       const p =
         row?.player ||
         row?.Player ||
         {};
 
       return {
-        id: val(
-          p,
-          [
-            "id",
-            "playerId",
-            "playerID"
-          ],
-          null
-        ),
 
-        name: val(
-          p,
-          [
-            "name",
-            "fullName",
-            "playerName",
-            "displayName"
-          ],
-          "Player"
-        ),
+        /*
+           IMPORTANT:
+           Use player.id.
 
-        country: val(
-          p,
-          [
-            "countryAcr",
-            "country",
-            "countryCode",
-            "countryCodeAcr"
-          ],
-          ""
-        ),
+           Do NOT use row.id.
+        */
+
+        id:
+          val(
+            p,
+            [
+              "id",
+              "playerId",
+              "playerID"
+            ],
+            null
+          ),
+
+        name:
+          val(
+            p,
+            [
+              "name",
+              "fullName",
+              "playerName",
+              "displayName"
+            ],
+            "Player"
+          ),
+
+        country:
+          val(
+            p,
+            [
+              "countryAcr",
+              "country",
+              "countryCode",
+              "countryCodeAcr"
+            ],
+            ""
+          ),
 
         rank:
           val(
@@ -851,33 +1068,43 @@ async function fetchRankings(env, tour) {
             [
               "rankingPoints",
               "point",
-              "points"
+              "points",
+              "pointsCurrent"
             ],
             0
           )
       };
     }
   );
-
-  return players;
 }
 
 
-async function refreshRankings(env) {
-  const [atpResult, wtaResult] =
+async function refreshRankings(
+  env
+) {
+
+  const results =
     await Promise.allSettled([
-      fetchRankings(env, "atp"),
-      fetchRankings(env, "wta")
+
+      fetchRankings(
+        env,
+        "atp"
+      ),
+
+      fetchRankings(
+        env,
+        "wta"
+      )
     ]);
 
   const atp =
-    atpResult.status === "fulfilled"
-      ? atpResult.value
+    results[0].status === "fulfilled"
+      ? results[0].value
       : [];
 
   const wta =
-    wtaResult.status === "fulfilled"
-      ? wtaResult.value
+    results[1].status === "fulfilled"
+      ? results[1].value
       : [];
 
   const updated =
@@ -888,6 +1115,7 @@ async function refreshRankings(env) {
     "rankings:atp",
     {
       ok: true,
+      version: VERSION,
       tour: "ATP",
       players: atp,
       count: atp.length,
@@ -900,6 +1128,7 @@ async function refreshRankings(env) {
     "rankings:wta",
     {
       ok: true,
+      version: VERSION,
       tour: "WTA",
       players: wta,
       count: wta.length,
@@ -919,45 +1148,83 @@ async function refreshRankings(env) {
    CALENDAR
    ============================================================ */
 
-async function fetchCalendar(env, tour, year) {
+async function fetchCalendar(
+  env,
+  tour,
+  year
+) {
+
   const path =
     `/tennis/v2/${tour}/tournament/calendar/${year}` +
     `?pageNo=1&pageSize=200`;
 
   const data =
-    await callRapidAPI(path, env);
+    await rapidAPI(
+      env,
+      path
+    );
 
   return arr(data);
 }
 
 
-async function refreshCalendar(env, year) {
-  const [atpResult, wtaResult] =
+async function refreshCalendar(
+  env,
+  year
+) {
+
+  const results =
     await Promise.allSettled([
-      fetchCalendar(env, "atp", year),
-      fetchCalendar(env, "wta", year)
+
+      fetchCalendar(
+        env,
+        "atp",
+        year
+      ),
+
+      fetchCalendar(
+        env,
+        "wta",
+        year
+      )
     ]);
 
   const atp =
-    atpResult.status === "fulfilled"
-      ? atpResult.value
+    results[0].status === "fulfilled"
+      ? results[0].value
       : [];
 
   const wta =
-    wtaResult.status === "fulfilled"
-      ? wtaResult.value
+    results[1].status === "fulfilled"
+      ? results[1].value
       : [];
 
+  const updated =
+    new Date().toISOString();
+
   const payload = {
+
     ok: true,
+
     version: VERSION,
+
     year,
+
     atp,
+
     wta,
-    count: atp.length + wta.length,
-    atpCount: atp.length,
-    wtaCount: wta.length,
-    updated: new Date().toISOString()
+
+    count:
+      atp.length +
+      wta.length,
+
+    atpCount:
+      atp.length,
+
+    wtaCount:
+      wta.length,
+
+    updated
   };
 
   await putCache(
@@ -971,62 +1238,134 @@ async function refreshCalendar(env, year) {
 
 
 /* ============================================================
-   BBC TENNIS NEWS
+   BBC NEWS
    ============================================================ */
 
-function decodeXML(value) {
-  if (!value) return "";
+function decodeXML(
+  value
+) {
+
+  if (!value) {
+    return "";
+  }
 
   return value
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'")
-    .replace(/&#(\d+);/g, (_, n) =>
-      String.fromCharCode(Number(n))
+
+    .replace(
+      /<!\[CDATA\[([\s\S]*?)\]\]>/g,
+      "$1"
+    )
+
+    .replace(
+      /&amp;/g,
+      "&"
+    )
+
+    .replace(
+      /&lt;/g,
+      "<"
+    )
+
+    .replace(
+      /&gt;/g,
+      ">"
+    )
+
+    .replace(
+      /&quot;/g,
+      '"'
+    )
+
+    .replace(
+      /&#39;/g,
+      "'"
+    )
+
+    .replace(
+      /&#x27;/g,
+      "'"
+    )
+
+    .replace(
+      /&#(\d+);/g,
+      (_, n) =>
+        String.fromCharCode(
+          Number(n)
+        )
     );
 }
 
 
-function stripHTML(value) {
-  if (!value) return "";
+function stripHTML(
+  value
+) {
+
+  if (!value) {
+    return "";
+  }
 
   return decodeXML(value)
-    .replace(/<br\s*\/?>/gi, " ")
-    .replace(/<\/p>/gi, " ")
-    .replace(/<[^>]*>/g, "")
-    .replace(/\s+/g, " ")
+
+    .replace(
+      /<br\s*\/?>/gi,
+      " "
+    )
+
+    .replace(
+      /<\/p>/gi,
+      " "
+    )
+
+    .replace(
+      /<[^>]*>/g,
+      ""
+    )
+
+    .replace(
+      /\s+/g,
+      " "
+    )
+
     .trim();
 }
 
 
-function xmlValue(block, tag) {
-  const re =
+function xmlValue(
+  block,
+  tag
+) {
+
+  const regex =
     new RegExp(
       `<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`,
       "i"
     );
 
-  const match = block.match(re);
+  const match =
+    block.match(regex);
 
   return match
-    ? decodeXML(match[1].trim())
+    ? decodeXML(
+        match[1].trim()
+      )
     : "";
 }
 
 
-function xmlAttribute(block, tag, attribute) {
-  const re =
+function xmlAttribute(
+  block,
+  tag,
+  attribute
+) {
+
+  const regex =
     new RegExp(
       `<${tag}\\b[^>]*\\b${attribute}=["']([^"']+)["'][^>]*>`,
       "i"
     );
 
   const match =
-    block.match(re);
+    block.match(regex);
 
   return match
     ? decodeXML(match[1])
@@ -1034,10 +1373,10 @@ function xmlAttribute(block, tag, attribute) {
 }
 
 
-function extractNewsImage(block, description) {
-  /*
-     Try BBC media:content
-  */
+function extractNewsImage(
+  block,
+  description
+) {
 
   let image =
     xmlAttribute(
@@ -1046,12 +1385,9 @@ function extractNewsImage(block, description) {
       "url"
     );
 
-  if (image) return image;
-
-
-  /*
-     Try media:thumbnail
-  */
+  if (image) {
+    return image;
+  }
 
   image =
     xmlAttribute(
@@ -1060,12 +1396,9 @@ function extractNewsImage(block, description) {
       "url"
     );
 
-  if (image) return image;
-
-
-  /*
-     Try enclosure
-  */
+  if (image) {
+    return image;
+  }
 
   image =
     xmlAttribute(
@@ -1074,20 +1407,21 @@ function extractNewsImage(block, description) {
       "url"
     );
 
-  if (image) return image;
-
-
-  /*
-     Try an image inside the description.
-  */
+  if (image) {
+    return image;
+  }
 
   const img =
-    decodeXML(description || "")
-      .match(
-        /<img[^>]+src=["']([^"']+)["']/i
-      );
+    decodeXML(
+      description || ""
+    ).match(
+      /<img[^>]+src=["']([^"']+)["']/i
+    );
 
-  if (img && img[1]) {
+  if (
+    img &&
+    img[1]
+  ) {
     return img[1];
   }
 
@@ -1095,61 +1429,97 @@ function extractNewsImage(block, description) {
 }
 
 
-function parseBBCNews(xml) {
-  if (!xml) return [];
+function parseBBCNews(
+  xml
+) {
 
-  const items = [];
-
-  const itemRegex =
-    /<item\b[\s\S]*?<\/item>/gi;
+  if (!xml) {
+    return [];
+  }
 
   const blocks =
-    xml.match(itemRegex) || [];
+    xml.match(
+      /<item\b[\s\S]*?<\/item>/gi
+    ) || [];
 
-  for (const block of blocks) {
+  const articles = [];
+
+  for (
+    const block of blocks
+  ) {
+
     const title =
       stripHTML(
-        xmlValue(block, "title")
+        xmlValue(
+          block,
+          "title"
+        )
       );
 
     const link =
-      xmlValue(block, "link");
+      xmlValue(
+        block,
+        "link"
+      );
 
     const pubDate =
-      xmlValue(block, "pubDate");
-
-    const rawDescription =
-      xmlValue(block, "description");
+      xmlValue(
+        block,
+        "pubDate"
+      );
 
     const description =
-      stripHTML(rawDescription);
+      xmlValue(
+        block,
+        "description"
+      );
 
     const image =
       extractNewsImage(
         block,
-        rawDescription
+        description
       );
 
-    if (!title || !link) {
+    if (
+      !title ||
+      !link
+    ) {
       continue;
     }
 
-    items.push({
+    articles.push({
+
       title,
+
       link,
+
       pubDate,
-      description,
+
+      description:
+        stripHTML(
+          description
+        ),
+
       image,
-      source: "BBC Sport"
+
+      source:
+        "BBC Sport"
     });
   }
 
-  return items.slice(0, 20);
+  return articles.slice(
+    0,
+    20
+  );
 }
 
 
-async function refreshNews(env) {
+async function refreshNews(
+  env
+) {
+
   try {
+
     const response =
       await fetch(
         BBC_TENNIS_RSS,
@@ -1162,6 +1532,7 @@ async function refreshNews(env) {
       );
 
     if (!response.ok) {
+
       throw new Error(
         `BBC RSS ${response.status}`
       );
@@ -1174,10 +1545,19 @@ async function refreshNews(env) {
       parseBBCNews(xml);
 
     const payload = {
+
       ok: true,
-      source: "BBC Sport",
+
+      version: VERSION,
+
+      source:
+        "BBC Sport",
+
       articles,
-      count: articles.length,
+
+      count:
+        articles.length,
+
       updated:
         new Date().toISOString()
     };
@@ -1191,16 +1571,11 @@ async function refreshNews(env) {
     return payload;
 
   } catch (error) {
+
     console.log(
       "BBC NEWS ERROR",
       error?.message
     );
-
-    /*
-       Do not destroy a previously
-       working cache if BBC is temporarily
-       unavailable.
-    */
 
     const existing =
       await getCache(
@@ -1213,71 +1588,44 @@ async function refreshNews(env) {
     }
 
     return {
+
       ok: false,
-      source: "BBC Sport",
+
+      version: VERSION,
+
+      source:
+        "BBC Sport",
+
       articles: [],
+
       count: 0,
+
       updated: null,
-      error: error?.message || "BBC RSS error"
+
+      error:
+        error?.message ||
+        "BBC RSS error"
     };
   }
 }
 
 
 /* ============================================================
-   RESPONSE HELPERS
+   VISITOR DATA
    ============================================================ */
 
-function json(data, status = 200) {
-  return new Response(
-    JSON.stringify(data),
-    {
-      status,
-      headers: {
-        "content-type":
-          "application/json; charset=UTF-8",
-        "cache-control":
-          "no-store"
-      }
-    }
-  );
-}
+async function getToday(
+  env
+) {
 
-
-/* ============================================================
-   VISITOR ENDPOINTS
-   IMPORTANT:
-   These endpoints ONLY READ KV.
-   They do NOT call RapidAPI.
-   ============================================================ */
-
-async function getToday(env) {
   const date =
-    todayUTC();
+    utcDate(0);
 
-  const data =
+  const today =
     await getCache(
       env,
       `today:${date}`
     );
-
-  if (!data) {
-    return {
-      ok: true,
-      date,
-      version: VERSION,
-      atp: [],
-      wta: [],
-      matches: [],
-      live: [],
-      count: 0,
-      atpCount: 0,
-      wtaCount: 0,
-      liveCount: 0,
-      cached: false,
-      updated: null
-    };
-  }
 
   const live =
     await getCache(
@@ -1285,20 +1633,61 @@ async function getToday(env) {
       `live:${date}`
     );
 
+  if (!today) {
+
+    return {
+
+      ok: true,
+
+      version: VERSION,
+
+      date,
+
+      atp: [],
+
+      wta: [],
+
+      matches: [],
+
+      live:
+        live?.live || [],
+
+      count: 0,
+
+      atpCount: 0,
+
+      wtaCount: 0,
+
+      liveCount:
+        live?.count || 0,
+
+      cached: false,
+
+      updated: null
+    };
+  }
+
   return {
-    ...data,
+
+    ...today,
+
     live:
       live?.live || [],
+
     liveCount:
       live?.count || 0,
+
     cached: true
   };
 }
 
 
-async function getYesterday(env) {
+async function getYesterday(
+  env
+) {
+
   const date =
-    dateUTC(-1);
+    utcDate(-1);
 
   const data =
     await getCache(
@@ -1307,17 +1696,29 @@ async function getYesterday(env) {
     );
 
   if (!data) {
+
     return {
+
       ok: true,
-      date,
+
       version: VERSION,
+
+      date,
+
       atp: [],
+
       wta: [],
+
       matches: [],
+
       count: 0,
+
       atpCount: 0,
+
       wtaCount: 0,
+
       cached: false,
+
       updated: null
     };
   }
@@ -1329,7 +1730,11 @@ async function getYesterday(env) {
 }
 
 
-async function getRankings(env, tour) {
+async function getRankings(
+  env,
+  tour
+) {
+
   const data =
     await getCache(
       env,
@@ -1337,12 +1742,22 @@ async function getRankings(env, tour) {
     );
 
   if (!data) {
+
     return {
+
       ok: true,
-      tour: tour.toUpperCase(),
+
+      version: VERSION,
+
+      tour:
+        tour.toUpperCase(),
+
       players: [],
+
       count: 0,
+
       cached: false,
+
       updated: null
     };
   }
@@ -1354,9 +1769,13 @@ async function getRankings(env, tour) {
 }
 
 
-async function getCalendar(env) {
+async function getCalendar(
+  env
+) {
+
   const year =
-    new Date().getUTCFullYear();
+    new Date()
+      .getUTCFullYear();
 
   const data =
     await getCache(
@@ -1365,13 +1784,27 @@ async function getCalendar(env) {
     );
 
   if (!data) {
+
     return {
+
       ok: true,
+
+      version: VERSION,
+
       year,
+
       atp: [],
+
       wta: [],
+
       count: 0,
+
+      atpCount: 0,
+
+      wtaCount: 0,
+
       cached: false,
+
       updated: null
     };
   }
@@ -1383,7 +1816,10 @@ async function getCalendar(env) {
 }
 
 
-async function getNews(env) {
+async function getNews(
+  env
+) {
+
   const data =
     await getCache(
       env,
@@ -1391,12 +1827,22 @@ async function getNews(env) {
     );
 
   if (!data) {
+
     return {
+
       ok: true,
-      source: "BBC Sport",
+
+      version: VERSION,
+
+      source:
+        "BBC Sport",
+
       articles: [],
+
       count: 0,
+
       cached: false,
+
       updated: null
     };
   }
@@ -1409,49 +1855,41 @@ async function getNews(env) {
 
 
 /* ============================================================
-   DEBUG / HEALTH
+   HEALTH
    ============================================================ */
 
-async function health(env) {
-  const date =
-    todayUTC();
+async function health(
+  env
+) {
+
+  const today =
+    utcDate(0);
 
   const yesterday =
-    dateUTC(-1);
+    utcDate(-1);
+
+  const year =
+    new Date()
+      .getUTCFullYear();
 
   const [
-    todayATP,
-    todayWTA,
-    live,
-    yesterdayATP,
-    yesterdayWTA,
-    calendar,
-    rankingsATP,
-    rankingsWTA,
-    news
+    todayData,
+    liveData,
+    yesterdayData,
+    calendarData,
+    atpRanking,
+    wtaRanking,
+    newsData
   ] = await Promise.all([
+
     getCache(
       env,
-      `today:${date}`
+      `today:${today}`
     ),
 
     getCache(
       env,
-      `today:${date}`
-    ).then(
-      async x => {
-        /*
-           Today is stored as one combined
-           cache object, so this simply
-           returns the same cache state.
-        */
-        return x;
-      }
-    ),
-
-    getCache(
-      env,
-      `live:${date}`
+      `live:${today}`
     ),
 
     getCache(
@@ -1461,12 +1899,7 @@ async function health(env) {
 
     getCache(
       env,
-      `yesterday:${yesterday}`
-    ),
-
-    getCache(
-      env,
-      `calendar:${new Date().getUTCFullYear()}`
+      `calendar:${year}`
     ),
 
     getCache(
@@ -1486,202 +1919,318 @@ async function health(env) {
   ]);
 
   return {
+
     ok: true,
+
     version: VERSION,
-    date,
+
+    date: today,
+
     cacheConfigured:
       !!env.TENNIS_CACHE,
+
     rapidApiConfigured:
       !!env.TENNIS_API_KEY,
 
     today: {
-      cached: !!todayATP,
+
+      cached:
+        !!todayData,
+
       count:
-        todayATP?.count || 0,
-      updated:
-        todayATP?.updated || null
-    },
+        todayData?.count || 0,
 
-    live: {
-      cached: !!live,
-      count:
-        live?.count || 0,
-      updated:
-        live?.updated || null
-    },
-
-    yesterday: {
-      date: yesterday,
-      cached: !!yesterdayATP,
-      count:
-        yesterdayATP?.count || 0,
-      updated:
-        yesterdayATP?.updated || null
-    },
-
-    calendar: {
-      cached: !!calendar,
-      count:
-        calendar?.count || 0,
-      updated:
-        calendar?.updated || null
-    },
-
-    rankings: {
-      atp: {
-        cached: !!rankingsATP,
-        count:
-          rankingsATP?.count || 0,
-        updated:
-          rankingsATP?.updated || null
-      },
-
-      wta: {
-        cached: !!rankingsWTA,
-        count:
-          rankingsWTA?.count || 0,
-        updated:
-          rankingsWTA?.updated || null
-      }
-    },
-
-    news: {
-      cached: !!news,
-      count:
-        news?.count || 0,
-      updated:
-        news?.updated || null
-    }
-  };
-}
-
-
-async function debug(env) {
-  const date =
-    todayUTC();
-
-  const yesterday =
-    dateUTC(-1);
-
-  const [
-    today,
-    live,
-    yesterdayData,
-    calendar,
-    atpRanking,
-    wtaRanking,
-    news
-  ] = await Promise.all([
-    getCache(
-      env,
-      `today:${date}`
-    ),
-
-    getCache(
-      env,
-      `live:${date}`
-    ),
-
-    getCache(
-      env,
-      `yesterday:${yesterday}`
-    ),
-
-    getCache(
-      env,
-      `calendar:${new Date().getUTCFullYear()}`
-    ),
-
-    getCache(
-      env,
-      "rankings:atp"
-    ),
-
-    getCache(
-      env,
-      "rankings:wta"
-    ),
-
-    getCache(
-      env,
-      "news:bbc"
-    )
-  ]);
-
-  return {
-    ok: true,
-    version: VERSION,
-    date,
-
-    today: {
-      cached: !!today,
-      count:
-        today?.count || 0,
       atpCount:
-        today?.atpCount || 0,
+        todayData?.atpCount || 0,
+
       wtaCount:
-        today?.wtaCount || 0,
+        todayData?.wtaCount || 0,
+
       updated:
-        today?.updated || null
+        todayData?.updated || null
     },
 
     live: {
-      cached: !!live,
+
+      cached:
+        !!liveData,
+
       count:
-        live?.count || 0,
+        liveData?.count || 0,
+
+      atpCount:
+        liveData?.atpCount || 0,
+
+      wtaCount:
+        liveData?.wtaCount || 0,
+
       updated:
-        live?.updated || null
+        liveData?.updated || null
     },
 
     yesterday: {
+
       date: yesterday,
-      cached: !!yesterdayData,
+
+      cached:
+        !!yesterdayData,
+
       count:
         yesterdayData?.count || 0,
+
       atpCount:
         yesterdayData?.atpCount || 0,
+
       wtaCount:
         yesterdayData?.wtaCount || 0,
+
       updated:
         yesterdayData?.updated || null
     },
 
     calendar: {
-      cached: !!calendar,
+
+      cached:
+        !!calendarData,
+
       count:
-        calendar?.count || 0,
+        calendarData?.count || 0,
+
       atpCount:
-        calendar?.atpCount || 0,
+        calendarData?.atpCount || 0,
+
       wtaCount:
-        calendar?.wtaCount || 0,
+        calendarData?.wtaCount || 0,
+
       updated:
-        calendar?.updated || null
+        calendarData?.updated || null
     },
 
     rankings: {
+
       atp: {
-        cached: !!atpRanking,
+
+        cached:
+          !!atpRanking,
+
         count:
           atpRanking?.count || 0,
+
         updated:
           atpRanking?.updated || null
       },
 
       wta: {
-        cached: !!wtaRanking,
+
+        cached:
+          !!wtaRanking,
+
         count:
           wtaRanking?.count || 0,
+
         updated:
           wtaRanking?.updated || null
       }
     },
 
     news: {
-      cached: !!news,
+
+      cached:
+        !!newsData,
+
       count:
-        news?.count || 0,
+        newsData?.count || 0,
+
       updated:
-        news?.updated || null
+        newsData?.updated || null
+    }
+  };
+}
+
+
+/* ============================================================
+   DEBUG
+   ============================================================ */
+
+async function debug(
+  env
+) {
+
+  const today =
+    utcDate(0);
+
+  const yesterday =
+    utcDate(-1);
+
+  const year =
+    new Date()
+      .getUTCFullYear();
+
+  const [
+    todayData,
+    liveData,
+    yesterdayData,
+    calendarData,
+    atpRanking,
+    wtaRanking,
+    newsData
+  ] = await Promise.all([
+
+    getCache(
+      env,
+      `today:${today}`
+    ),
+
+    getCache(
+      env,
+      `live:${today}`
+    ),
+
+    getCache(
+      env,
+      `yesterday:${yesterday}`
+    ),
+
+    getCache(
+      env,
+      `calendar:${year}`
+    ),
+
+    getCache(
+      env,
+      "rankings:atp"
+    ),
+
+    getCache(
+      env,
+      "rankings:wta"
+    ),
+
+    getCache(
+      env,
+      "news:bbc"
+    )
+  ]);
+
+  return {
+
+    ok: true,
+
+    version: VERSION,
+
+    date: today,
+
+    today: {
+
+      cached:
+        !!todayData,
+
+      count:
+        todayData?.count || 0,
+
+      atpCount:
+        todayData?.atpCount || 0,
+
+      wtaCount:
+        todayData?.wtaCount || 0,
+
+      updated:
+        todayData?.updated || null
+    },
+
+    live: {
+
+      cached:
+        !!liveData,
+
+      count:
+        liveData?.count || 0,
+
+      updated:
+        liveData?.updated || null
+    },
+
+    yesterday: {
+
+      date: yesterday,
+
+      cached:
+        !!yesterdayData,
+
+      count:
+        yesterdayData?.count || 0,
+
+      atpCount:
+        yesterdayData?.atpCount || 0,
+
+      wtaCount:
+        yesterdayData?.wtaCount || 0,
+
+      updated:
+        yesterdayData?.updated || null
+    },
+
+    calendar: {
+
+      cached:
+        !!calendarData,
+
+      count:
+        calendarData?.count || 0,
+
+      atpCount:
+        calendarData?.atpCount || 0,
+
+      wtaCount:
+        calendarData?.wtaCount || 0,
+
+      updated:
+        calendarData?.updated || null
+    },
+
+    rankings: {
+
+      atp: {
+
+        cached:
+          !!atpRanking,
+
+        count:
+          atpRanking?.count || 0,
+
+        updated:
+          atpRanking?.updated || null,
+
+        first:
+          atpRanking?.players?.[0] || null
+      },
+
+      wta: {
+
+        cached:
+          !!wtaRanking,
+
+        count:
+          wtaRanking?.count || 0,
+
+        updated:
+          wtaRanking?.updated || null,
+
+        first:
+          wtaRanking?.players?.[0] || null
+      }
+    },
+
+    news: {
+
+      cached:
+        !!newsData,
+
+      count:
+        newsData?.count || 0,
+
+      updated:
+        newsData?.updated || null
     }
   };
 }
@@ -1691,7 +2240,10 @@ async function debug(env) {
    RANKING DEBUG
    ============================================================ */
 
-async function rankingsDebug(env) {
+async function rankingsDebug(
+  env
+) {
+
   const atp =
     await getCache(
       env,
@@ -1705,31 +2257,51 @@ async function rankingsDebug(env) {
     );
 
   return {
+
     ok: true,
+
     version: VERSION,
 
     atp: {
-      cached: !!atp,
+
+      cached:
+        !!atp,
+
       count:
         atp?.count || 0,
+
       updated:
         atp?.updated || null,
+
       first:
         atp?.players?.[0] || null,
+
       second:
-        atp?.players?.[1] || null
+        atp?.players?.[1] || null,
+
+      third:
+        atp?.players?.[2] || null
     },
 
     wta: {
-      cached: !!wta,
+
+      cached:
+        !!wta,
+
       count:
         wta?.count || 0,
+
       updated:
         wta?.updated || null,
+
       first:
         wta?.players?.[0] || null,
+
       second:
-        wta?.players?.[1] || null
+        wta?.players?.[1] || null,
+
+      third:
+        wta?.players?.[2] || null
     }
   };
 }
@@ -1739,104 +2311,117 @@ async function rankingsDebug(env) {
    SCHEDULED REFRESH
    ============================================================ */
 
-async function scheduledRefresh(env, controller) {
+async function scheduledRefresh(
+  env,
+  controller
+) {
+
   const now =
     new Date();
 
-  const date =
-    now.toISOString().slice(0, 10);
+  const today =
+    utcDate(0);
 
-  /*
-     The Worker has six cron runs per day.
+  const yesterday =
+    utcDate(-1);
 
-     Every run:
-       - today's ATP
-       - today's WTA
-       - live ATP/WTA
-       - BBC news
-
-     08:00 UTC:
-       - yesterday ATP
-       - yesterday WTA
-
-     00:00 UTC:
-       - ATP ranking
-       - WTA ranking
-       - ATP calendar
-       - WTA calendar
-
-     We use controller.cron when available.
-     This avoids relying on the local hour.
-  */
+  const year =
+    now.getUTCFullYear();
 
   const cron =
     controller?.cron || "";
 
   console.log(
-    `${VERSION} scheduled run`,
+    `${VERSION} scheduled refresh`,
     cron,
-    date
+    today
   );
 
-  /*
-     Always refresh today's fixtures.
-  */
-
-  await Promise.allSettled([
-    refreshToday(env, date),
-    refreshLive(env, date),
-    refreshNews(env)
-  ]);
-
 
   /*
-     08:00 UTC cron.
+     EVERY RUN:
 
-     If your wrangler.json uses:
+     1. ATP today
+     2. WTA today
+     3. ATP live
+     4. WTA live
+     5. ATP yesterday
+     6. WTA yesterday
+     7. ATP ranking
+     8. WTA ranking
+     9. ATP calendar
+     10. WTA calendar
+     11. BBC news
 
-       0 8 * * *
-
-     this refreshes yesterday.
+     This deliberately refreshes everything
+     every 4 hours.
   */
 
-  if (
-    cron === "0 8 * * *" ||
-    cron === "0 08 * * *"
-  ) {
-    await refreshYesterday(
-      env,
-      dateUTC(-1)
-    );
-  }
-
-
-  /*
-     Midnight UTC cron.
-
-     Refresh rankings and calendar.
-  */
-
-  if (
-    cron === "0 0 * * *" ||
-    cron === "0 00 * * *"
-  ) {
-    const year =
-      now.getUTCFullYear();
-
+  const results =
     await Promise.allSettled([
-      refreshRankings(env),
-      refreshCalendar(env, year)
-    ]);
-  }
 
-  return {
-    ok: true,
-    version: VERSION,
-    cron,
-    date,
-    completed:
-      new Date().toISOString()
-  };
+      refreshToday(
+        env,
+        today
+      ),
+
+      refreshLive(
+        env,
+        today
+      ),
+
+      refreshYesterday(
+        env,
+        yesterday
+      ),
+
+      refreshRankings(
+        env
+      ),
+
+      refreshCalendar(
+        env,
+        year
+      ),
+
+      refreshNews(
+        env
+      )
+    ]);
+
+
+  console.log(
+    `${VERSION} refresh complete`,
+    results.map(
+      r => r.status
+    )
+  );
+}
+
+
+/* ============================================================
+   JSON RESPONSE
+   ============================================================ */
+
+function json(
+  data,
+  status = 200
+) {
+
+  return new Response(
+    JSON.stringify(data),
+    {
+      status,
+
+      headers: {
+        "content-type":
+          "application/json; charset=UTF-8",
+
+        "cache-control":
+          "no-store"
+      }
+    }
+  );
 }
 
 
@@ -1844,7 +2429,11 @@ async function scheduledRefresh(env, controller) {
    HTTP ROUTER
    ============================================================ */
 
-async function handleRequest(request, env) {
+async function handleRequest(
+  request,
+  env
+) {
+
   const url =
     new URL(request.url);
 
@@ -1852,68 +2441,72 @@ async function handleRequest(request, env) {
     url.pathname;
 
 
-  /* ----------------------------------------------------------
-     HEALTH
-     ---------------------------------------------------------- */
+  /* HEALTH */
 
-  if (path === "/api/health") {
+  if (
+    path === "/api/health"
+  ) {
+
     return json(
       await health(env)
     );
   }
 
 
-  /* ----------------------------------------------------------
-     DEBUG
-     ---------------------------------------------------------- */
+  /* DEBUG */
 
-  if (path === "/api/debug") {
+  if (
+    path === "/api/debug"
+  ) {
+
     return json(
       await debug(env)
     );
   }
 
 
-  /* ----------------------------------------------------------
-     RANKING DEBUG
-     ---------------------------------------------------------- */
+  /* RANKING DEBUG */
 
   if (
     path === "/api/rankings-debug"
   ) {
+
     return json(
       await rankingsDebug(env)
     );
   }
 
 
-  /* ----------------------------------------------------------
-     TODAY
-     ---------------------------------------------------------- */
+  /* TODAY */
 
-  if (path === "/api/today") {
+  if (
+    path === "/api/today"
+  ) {
+
     return json(
       await getToday(env)
     );
   }
 
 
-  /* ----------------------------------------------------------
-     YESTERDAY
-     ---------------------------------------------------------- */
+  /* YESTERDAY */
 
-  if (path === "/api/yesterday") {
+  if (
+    path === "/api/yesterday"
+  ) {
+
     return json(
       await getYesterday(env)
     );
   }
 
 
-  /* ----------------------------------------------------------
-     RANKINGS
-     ---------------------------------------------------------- */
+  /* ATP RANKINGS */
 
-  if (path === "/api/rankings/atp") {
+  if (
+    path === "/api/rankings/atp"
+  ) {
+
     return json(
       await getRankings(
         env,
@@ -1922,7 +2515,13 @@ async function handleRequest(request, env) {
     );
   }
 
-  if (path === "/api/rankings/wta") {
+
+  /* WTA RANKINGS */
+
+  if (
+    path === "/api/rankings/wta"
+  ) {
+
     return json(
       await getRankings(
         env,
@@ -1932,59 +2531,75 @@ async function handleRequest(request, env) {
   }
 
 
-  /* ----------------------------------------------------------
-     CALENDAR
-     ---------------------------------------------------------- */
+  /* CALENDAR */
 
-  if (path === "/api/calendar") {
+  if (
+    path === "/api/calendar"
+  ) {
+
     return json(
       await getCalendar(env)
     );
   }
 
 
-  /* ----------------------------------------------------------
-     BBC NEWS
-     ---------------------------------------------------------- */
+  /* BBC NEWS */
 
-  if (path === "/api/news") {
+  if (
+    path === "/api/news"
+  ) {
+
     return json(
       await getNews(env)
     );
   }
 
 
-  /* ----------------------------------------------------------
-     API ROOT
-     ---------------------------------------------------------- */
+  /* API ROOT */
 
-  if (path === "/api") {
+  if (
+    path === "/api"
+  ) {
+
     return json({
+
       ok: true,
+
       version: VERSION,
+
       endpoints: [
+
         "/api/health",
+
         "/api/debug",
+
         "/api/today",
+
         "/api/yesterday",
-        "/api/calendar",
+
         "/api/rankings/atp",
+
         "/api/rankings/wta",
+
+        "/api/calendar",
+
         "/api/news"
       ]
     });
   }
 
 
-  /* ----------------------------------------------------------
-     STATIC WEBSITE
-     ---------------------------------------------------------- */
+  /* STATIC WEBSITE */
 
   if (
     env.ASSETS &&
-    typeof env.ASSETS.fetch === "function"
+    typeof env.ASSETS.fetch ===
+      "function"
   ) {
-    return env.ASSETS.fetch(request);
+
+    return env.ASSETS.fetch(
+      request
+    );
   }
 
 
@@ -1992,6 +2607,7 @@ async function handleRequest(request, env) {
     "YepTennis",
     {
       status: 200,
+
       headers: {
         "content-type":
           "text/plain; charset=UTF-8"
@@ -2002,17 +2618,23 @@ async function handleRequest(request, env) {
 
 
 /* ============================================================
-   WORKER EXPORT
+   WORKER
    ============================================================ */
 
 export default {
 
-  async fetch(request, env) {
+  async fetch(
+    request,
+    env
+  ) {
+
     try {
+
       return await handleRequest(
         request,
         env
       );
+
     } catch (error) {
 
       console.log(
@@ -2025,7 +2647,9 @@ export default {
       return json(
         {
           ok: false,
+
           version: VERSION,
+
           error:
             error?.message ||
             "Internal Worker error"
@@ -2036,12 +2660,18 @@ export default {
   },
 
 
-  async scheduled(controller, env) {
+  async scheduled(
+    controller,
+    env
+  ) {
+
     try {
+
       await scheduledRefresh(
         env,
         controller
       );
+
     } catch (error) {
 
       console.log(
