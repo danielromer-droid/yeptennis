@@ -2190,6 +2190,17 @@ async function fetch(
 
 
   if (
+    if (pathname === "/api/rankings/atp") {
+  return jsonResponse(
+    await rankings(env, "atp")
+  );
+}
+
+if (pathname === "/api/rankings/wta") {
+  return jsonResponse(
+    await rankings(env, "wta")
+  );
+}
     pathname === "/api/rankings-debug"
   ) {
 
