@@ -1,4 +1,4 @@
-const VERSION="YepTennis Simple 1.0",HOST="tennis-api-atp-wta-itf.p.rapidapi.com",BASE=`https://${HOST}`;const TTL={rankings:86400,calendar:86400,results:86400,news:21600};
+const VERSION="YepTennis Simple 1.1",HOST="tennis-api-atp-wta-itf.p.rapidapi.com",BASE=`https://${HOST}`;const TTL={rankings:86400,calendar:86400,results:86400,news:21600};
 const json=(d,s=200)=>new Response(JSON.stringify(d),{status:s,headers:{"content-type":"application/json;charset=utf-8","cache-control":"no-store"}});
 async function api(path,env){if(!env.TENNIS_API_KEY)throw Error("TENNIS_API_KEY is not configured in Cloudflare.");const r=await fetch(BASE+path,{headers:{"X-RapidAPI-Key":env.TENNIS_API_KEY,"X-RapidAPI-Host":HOST}}),t=await r.text();let d={};try{d=JSON.parse(t)}catch{}if(!r.ok)throw Error(d.message||d.error||`Tennis API HTTP ${r.status}`);if(d?.error)throw Error(String(d.error));return d}
 function arr(d,keys=[]){if(Array.isArray(d))return d;for(const k of ["data","results","items",...keys])if(Array.isArray(d?.[k]))return d[k];return[]}
