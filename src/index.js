@@ -22,6 +22,7 @@ const CALENDAR_TTL = 24 * 60 * 60;
 const RANKINGS_TTL = 24 * 60 * 60;
 const DEBUG_TTL = TODAY_TTL;
 const YESTERDAY_TTL = 48 * 60 * 60;
+const PAST_RESULTS_TTL = 7 * 24 * 60 * 60; // completed days don't change
 
 const J = (x, s = 200) =>
   new Response(JSON.stringify(x), {
@@ -220,6 +221,48 @@ function extractScore(x) {
   return score || "";
 }
 
+/* =====================================================
+   TOURNAMENT LEVEL CLASSIFICATION
+
+   Shared by match() and tournamentInfo() so results,
+   calendar, and the frontend filters all agree on the
+   same set of levels: Grand Slam, Finals, 1000, 500, 250.
+   Anything that doesn't match stays "" (unclassified) and
+   is left out of the calendar, since it's the "most
+   relevant" tiers the site focuses on.
+   ===================================================== */
+
+function classify(name, levelRaw) {
+
+  const text =
+    `${name || ""} ${levelRaw || ""}`.toLowerCase();
+
+  if (
+    /australian open|roland garros|french open|wimbledon|us open|grand slam/
+      .test(text)
+  ) {
+    return "Grand Slam";
+  }
+
+  if (/finals/.test(text)) {
+    return "Finals";
+  }
+
+  if (/1000|masters/.test(text)) {
+    return "1000";
+  }
+
+  if (/\b500\b/.test(text)) {
+    return "500";
+  }
+
+  if (/\b250\b/.test(text)) {
+    return "250";
+  }
+
+  return "";
+}
+
 function match(x, tour) {
   const a = player(
     x.player1 || x.home
@@ -328,6 +371,9 @@ function match(x, tour) {
 
     level,
 
+    category:
+      classify(tournament, level),
+
     round,
 
     start
@@ -359,6 +405,9 @@ function masters(x, tour) {
       tier ||
       rank,
 
+    category:
+      classify(name, tier || rank),
+
     start: val(
       x,
       [
@@ -384,12 +433,7 @@ function masters(x, tour) {
     surface:
       x.court?.name ||
       x.surface ||
-      "",
-
-    isMasters:
-      /masters|1000/i.test(
-        `${name} ${tier} ${rank}`
-      )
+      ""
   };
 }
 
@@ -525,12 +569,7 @@ async function today(env) {
     .toISOString()
     .slice(0, 10);
 
-  return cached(
-    env,
-    `today:${d}`,
-    TODAY_TTL,
-    () => fetchToday(env, d)
-  );
+  return resultsForDate(env, d);
 }
 
 
@@ -539,11 +578,36 @@ async function yesterday(env) {
     .toISOString()
     .slice(0, 10);
 
+  return resultsForDate(env, d);
+}
+
+
+/* =====================================================
+   RESULTS FOR ANY DATE
+
+   Today's date gets a 12h TTL (results can still change
+   over the day). Any other date is a day that has already
+   finished, so its results are final - cache those for a
+   full week instead of re-hitting the upstream API for
+   dates users are just browsing back through.
+   ===================================================== */
+
+async function resultsForDate(env, date) {
+
+  const todayIso = new Date()
+    .toISOString()
+    .slice(0, 10);
+
+  const ttl =
+    date === todayIso
+      ? TODAY_TTL
+      : PAST_RESULTS_TTL;
+
   return cached(
     env,
-    `yesterday:${d}`,
-    YESTERDAY_TTL,
-    () => fetchToday(env, d)
+    `results:${date}`,
+    ttl,
+    () => fetchToday(env, date)
   );
 }
 
@@ -554,7 +618,7 @@ async function yesterday(env) {
 
 async function debug(env) {
   const d = new Date().toISOString().slice(0, 10);
-  const key = `today:${d}`;
+  const key = `results:${d}`;
   let cachedToday = null;
   let error = null;
 
@@ -628,7 +692,7 @@ async function fetchCalendar(env, y) {
 
       .filter(
         x =>
-          x.isMasters &&
+          x.category &&
           x.start &&
           (!x.end || x.end >= todayIso)
       )
@@ -957,20 +1021,20 @@ export default {
     ctx.waitUntil((async () => {
       await refreshCache(
         env,
-        `today:${d}`,
+        `results:${d}`,
         TODAY_TTL,
         () => fetchToday(env, d)
       );
 
-      // At 08:00 UTC, refresh yesterday's completed results once.
+      // At 08:00 UTC, refresh yesterday's now-final results once.
       if (now.getUTCHours() === 8) {
         const yd = new Date(now.getTime() - 24 * 60 * 60 * 1000)
           .toISOString()
           .slice(0, 10);
         await refreshCache(
           env,
-          `yesterday:${yd}`,
-          YESTERDAY_TTL,
+          `results:${yd}`,
+          PAST_RESULTS_TTL,
           () => fetchToday(env, yd)
         );
       }
@@ -1067,6 +1131,35 @@ export default {
 
       if (u.pathname === "/api/yesterday") {
         return J(await yesterday(env));
+      }
+
+      /* RESULTS FOR ANY DATE (?date=YYYY-MM-DD, defaults to today) */
+
+      if (u.pathname === "/api/results") {
+
+        const requested =
+          u.searchParams.get("date");
+
+        const todayIso =
+          new Date().toISOString().slice(0, 10);
+
+        const date =
+          requested &&
+          /^\d{4}-\d{2}-\d{2}$/.test(requested)
+            ? requested
+            : todayIso;
+
+        // never fetch future dates - fixtures for them
+        // simply don't exist yet
+        if (date > todayIso) {
+          return J(
+            { error: "date is in the future", version: VERSION },
+            400
+          );
+        }
+
+        return J(await resultsForDate(env, date));
+
       }
 
       /* RANKINGS DEBUG */

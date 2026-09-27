@@ -3,37 +3,49 @@
    ATP / WTA / Grand Slams / 1000 / 500
    ========================================================= */
 
-let todayData = null;
-let yesterdayData = null;
-let resultsDate = "today";
+const todayISO = () =>
+  new Date().toISOString().slice(0, 10);
+
+let resultsByDate = new Map(); // date string -> /api/results payload
+let resultsDateISO = todayISO();
 let calendarData = null;
 let newsData = null;
 let rankingsData = { atp: null, wta: null };
-let resultsFilter = "all";
+let resultsFilter = "all";   // all / atp / wta / live / completed
+let resultsLevel = "all";    // all / Grand Slam / 1000 / 500 / 250
 let rankingsTour = "atp";
 
 const REFRESH_MS = 60000;
 
 /*
-   The worker caches upstream calls (12h for results, 24h
-   for rankings/calendar), so polling this often only
-   re-reads the worker's own cache - it does not add extra
-   load on the RapidAPI quota.
+   The worker caches upstream calls (12h for today's results,
+   7 days for past dates, 24h for rankings/calendar), so
+   polling or browsing dates this often only re-reads the
+   worker's own cache - it does not add extra load on the
+   RapidAPI quota.
 */
 
 
 document.addEventListener("DOMContentLoaded", () => {
 
   setupNavigation();
+  setupDateNav();
   setupResultTabs();
+  setupLevelTabs();
   setupRankingsTabs();
 
-  loadToday();
+  loadResultsForDate(resultsDateISO);
   loadNews();
   loadCalendar();
   loadRankings("atp");
 
-  setInterval(loadToday, REFRESH_MS);
+  setInterval(() => {
+    // Only auto-refresh while looking at today - a past
+    // date's results are already final.
+    if (resultsDateISO === todayISO()) {
+      loadResultsForDate(resultsDateISO, { silent: true });
+    }
+  }, REFRESH_MS);
 
 });
 
@@ -63,7 +75,69 @@ function setupNavigation() {
 
 
 /* =========================================================
-   RESULT TABS
+   DATE NAVIGATION (browse results day by day)
+   ========================================================= */
+
+function setupDateNav() {
+
+  const prev = document.getElementById("date-prev");
+  const next = document.getElementById("date-next");
+
+  if (prev) {
+    prev.addEventListener("click", () => shiftResultsDate(-1));
+  }
+
+  if (next) {
+    next.addEventListener("click", () => shiftResultsDate(1));
+  }
+
+}
+
+function shiftResultsDate(deltaDays) {
+
+  const d = new Date(resultsDateISO + "T00:00:00Z");
+
+  d.setUTCDate(d.getUTCDate() + deltaDays);
+
+  const candidate = d.toISOString().slice(0, 10);
+
+  if (candidate > todayISO()) return; // no fixtures for the future
+
+  resultsDateISO = candidate;
+
+  updateDateNavUI();
+
+  if (resultsByDate.has(resultsDateISO)) {
+    renderResults();
+    updateResultsDate();
+  }
+  else {
+    loadResultsForDate(resultsDateISO);
+  }
+
+}
+
+function updateDateNavUI() {
+
+  const label = document.getElementById("date-label");
+  const next = document.getElementById("date-next");
+
+  if (label) {
+    label.textContent =
+      resultsDateISO === todayISO()
+        ? `Today · ${formatDate(resultsDateISO)}`
+        : formatDate(resultsDateISO);
+  }
+
+  if (next) {
+    next.disabled = resultsDateISO >= todayISO();
+  }
+
+}
+
+
+/* =========================================================
+   RESULT TABS (tour / live / completed)
    ========================================================= */
 
 function setupResultTabs() {
@@ -74,27 +148,42 @@ function setupResultTabs() {
 
   tabs.forEach(button => {
 
-    button.addEventListener("click", async () => {
+    button.addEventListener("click", () => {
 
       tabs.forEach(b => b.classList.remove("selected"));
       button.classList.add("selected");
 
-      if (button.dataset.date) {
-        resultsDate = button.dataset.date;
-        resultsFilter = "all";
+      resultsFilter = button.dataset.filter || "all";
 
-        if (resultsDate === "yesterday") {
-          if (!yesterdayData) await loadYesterday();
-          else { renderResults(); updateResultsDate(); }
-        } else {
-          if (!todayData) await loadToday();
-          else { renderResults(); updateResultsDate(); }
-        }
-      }
-      else if (button.dataset.filter) {
-        resultsFilter = button.dataset.filter;
-        renderResults();
-      }
+      renderResults();
+
+    });
+
+  });
+
+}
+
+
+/* =========================================================
+   LEVEL TABS (Grand Slam / 1000 / 500 / 250)
+   ========================================================= */
+
+function setupLevelTabs() {
+
+  const tabs = document.querySelectorAll("#level-tabs button");
+
+  if (!tabs.length) return;
+
+  tabs.forEach(button => {
+
+    button.addEventListener("click", () => {
+
+      tabs.forEach(b => b.classList.remove("selected"));
+      button.classList.add("selected");
+
+      resultsLevel = button.dataset.level || "all";
+
+      renderResults();
 
     });
 
@@ -171,30 +260,37 @@ async function fetchJSON(url) {
    TODAY'S RESULTS
    ========================================================= */
 
-async function loadToday() {
-  try {
-    todayData = await fetchJSON("/api/today");
-    if (resultsDate === "today") {
-      renderResults();
-      updateResultsDate();
-    }
-  } catch (error) {
-    console.error("YepTennis /api/today:", error);
-    showResultsError();
-  }
-}
+async function loadResultsForDate(date, { silent = false } = {}) {
 
-async function loadYesterday() {
+  const list = document.getElementById("results-list");
+
+  if (!silent && list && !resultsByDate.has(date)) {
+    list.innerHTML = `<div class="loading">Loading results...</div>`;
+  }
+
   try {
-    yesterdayData = await fetchJSON("/api/yesterday");
-    if (resultsDate === "yesterday") {
+
+    const data =
+      await fetchJSON(`/api/results?date=${date}`);
+
+    resultsByDate.set(date, data);
+
+    if (resultsDateISO === date) {
       renderResults();
       updateResultsDate();
     }
-  } catch (error) {
-    console.error("YepTennis /api/yesterday:", error);
-    showResultsError();
+
   }
+  catch (error) {
+
+    console.error("YepTennis /api/results:", error);
+
+    if (resultsDateISO === date && !resultsByDate.has(date)) {
+      showResultsError();
+    }
+
+  }
+
 }
 
 function showResultsError() {
@@ -204,54 +300,12 @@ function showResultsError() {
 
 
 /* =========================================================
-   MATCH CATEGORY (derived from the tournament name only -
-   the worker already gives us clean tour/player/score/status
-   fields, so we just add display-only classification here)
-   ========================================================= */
-
-function matchCategory(match) {
-
-  const text =
-    `${match.tournament || ""} ${match.level || ""}`
-      .toLowerCase();
-
-  if (
-    /grand slam|australian open|roland garros|wimbledon|us open/
-      .test(text)
-  ) {
-    return "Grand Slam";
-  }
-
-  if (
-    /finals|wta finals|atp finals/
-      .test(text)
-  ) {
-    return "Finals";
-  }
-
-  if (
-    /masters 1000|masters|1000/
-      .test(text)
-  ) {
-    return match.tour === "wta" ? "WTA 1000" : "ATP 1000";
-  }
-
-  if (/500/.test(text)) {
-    return match.tour === "wta" ? "WTA 500" : "ATP 500";
-  }
-
-  return "";
-
-}
-
-
-/* =========================================================
    RESULTS RENDERING
    ========================================================= */
 
 function renderResults() {
 
-  const activeData = resultsDate === "yesterday" ? yesterdayData : todayData;
+  const activeData = resultsByDate.get(resultsDateISO);
   if (!activeData) return;
 
   const matches =
@@ -264,31 +318,43 @@ function renderResults() {
 
 
   /* ---------------------------------------------
-     Filters
+     Tour / live / completed filter
      --------------------------------------------- */
 
   if (resultsFilter === "atp") {
 
     filtered =
-      matches.filter(m => m.tour === "atp");
+      filtered.filter(m => m.tour === "atp");
 
   }
   else if (resultsFilter === "wta") {
 
     filtered =
-      matches.filter(m => m.tour === "wta");
+      filtered.filter(m => m.tour === "wta");
 
   }
   else if (resultsFilter === "live") {
 
     filtered =
-      matches.filter(m => m.live);
+      filtered.filter(m => m.live);
 
   }
   else if (resultsFilter === "completed") {
 
     filtered =
-      matches.filter(m => m.completed);
+      filtered.filter(m => m.completed);
+
+  }
+
+
+  /* ---------------------------------------------
+     Level filter (Grand Slam / 1000 / 500 / 250)
+     --------------------------------------------- */
+
+  if (resultsLevel !== "all") {
+
+    filtered =
+      filtered.filter(m => m.category === resultsLevel);
 
   }
 
@@ -329,10 +395,10 @@ function renderResults() {
 
     message.textContent =
       resultsFilter === "wta"
-        ? "No WTA matches available today."
+        ? "No WTA matches for this day/filter."
         : resultsFilter === "atp"
-          ? "No ATP matches available today."
-          : "No matches available.";
+          ? "No ATP matches for this day/filter."
+          : "No matches for this day/filter.";
 
     list.appendChild(message);
 
@@ -373,7 +439,7 @@ function renderResults() {
 
     const first = group[0];
 
-    const category = matchCategory(first);
+    const category = first.category || "";
 
     const tournamentHeader =
       document.createElement("div");
@@ -466,7 +532,7 @@ function updateTabCounts(matches) {
 
   const tabs =
     document.querySelectorAll(
-      ".results-card .tabs button"
+      "#results-tabs button"
     );
 
   if (!tabs.length) return;
@@ -504,6 +570,43 @@ function updateTabCounts(matches) {
 
   });
 
+
+  updateLevelCounts(matches);
+
+}
+
+
+function updateLevelCounts(matches) {
+
+  const tabs =
+    document.querySelectorAll(
+      "#level-tabs button"
+    );
+
+  if (!tabs.length) return;
+
+  const counts = {};
+
+  matches.forEach(m => {
+    const key = m.category || "";
+    counts[key] = (counts[key] || 0) + 1;
+  });
+
+  tabs.forEach(button => {
+
+    const level = button.dataset.level;
+
+    if (level === "all") {
+      button.textContent = "ALL LEVELS";
+      return;
+    }
+
+    const n = counts[level] || 0;
+
+    button.textContent = `${level.toUpperCase()}${n ? ` (${n})` : ""}`;
+
+  });
+
 }
 
 
@@ -518,7 +621,7 @@ function updateResultsDate() {
 
   if (!el) return;
 
-  const activeData = resultsDate === "yesterday" ? yesterdayData : todayData;
+  const activeData = resultsByDate.get(resultsDateISO);
 
   if (activeData?.date) {
     el.textContent = `▣ ${formatDate(activeData.date)}`;
@@ -853,13 +956,13 @@ function renderCalendar() {
 
   const tournaments =
     (calendarData.tournaments || [])
-      .slice(0, 10);
+      .slice(0, 20);
 
   if (!tournaments.length) {
 
     container.innerHTML = `
       <div class="api-message">
-        No upcoming Masters/1000-level events found.
+        No upcoming Grand Slam / 1000 / 500 / 250 events found.
       </div>
     `;
 
@@ -874,15 +977,24 @@ function renderCalendar() {
           <div>
             <b>${escapeHTML(t.name || "Tournament")}</b>
             <span>
-              ${t.tour.toUpperCase()}${t.tier ? " · " + escapeHTML(t.tier) : ""}
+              ${t.tour.toUpperCase()}
               ${t.country ? " · " + escapeHTML(t.country) : ""}
             </span>
           </div>
+          <span class="calendar-badge${t.category ? " cat-" + slug(t.category) : ""}">
+            ${escapeHTML(t.category || t.tier || "")}
+          </span>
           <small>${escapeHTML(formatDate(t.start))}</small>
         </article>
       `)
       .join("");
 
+}
+
+function slug(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-");
 }
 
 
@@ -946,7 +1058,7 @@ function renderRankings() {
 
   const players =
     (data.players || [])
-      .slice(0, 10);
+      .slice(0, 20);
 
   if (!players.length) {
 
@@ -969,9 +1081,37 @@ function renderRankings() {
             ${countryFlag(p.country)} ${escapeHTML(p.name || "Player")}
           </span>
           <span class="ranking-points">${escapeHTML(String(p.points ?? ""))}</span>
+          <a
+            class="ranking-info"
+            href="${playerInfoURL(p.name)}"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="More about ${escapeHTML(p.name || "this player")}"
+          >
+            ⓘ
+          </a>
         </article>
       `)
       .join("");
+
+}
+
+
+/* =========================================================
+   PLAYER INFO LINK
+
+   We don't get a canonical profile URL from the API, so
+   this points at a Wikipedia search for the player's name -
+   a reliable link that will surface their page (or the
+   closest match) rather than guessing a URL that might 404.
+   ========================================================= */
+
+function playerInfoURL(name) {
+
+  const query =
+    encodeURIComponent(`${name || ""} tennis`);
+
+  return `https://en.wikipedia.org/w/index.php?search=${query}&title=Special:Search&fulltext=1`;
 
 }
 

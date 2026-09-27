@@ -913,12 +913,23 @@ button { font: inherit; }
 
 .ranking-item {
   display: grid;
-  grid-template-columns: 40px 1fr 70px;
+  grid-template-columns: 40px 1fr 70px 26px;
   align-items: center;
   gap: 15px;
   padding: 12px 20px;
   border-bottom: 1px solid var(--line);
   font-size: 13px;
+}
+
+.ranking-info {
+  text-decoration: none;
+  color: var(--muted);
+  text-align: center;
+  font-size: 14px;
+}
+
+.ranking-info:hover {
+  color: var(--ink);
 }
 
 .ranking-item:last-child {
@@ -954,6 +965,23 @@ button { font: inherit; }
   border-bottom: 1px solid var(--line);
 }
 
+.calendar-badge {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: #eef4f2;
+  color: var(--ink);
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.calendar-badge.cat-grand-slam {
+  background: var(--ink);
+  color: var(--green);
+}
+
 .calendar-item:last-child {
   border-bottom: 0;
 }
@@ -973,4 +1001,48 @@ button { font: inherit; }
   font-weight: 800;
   color: var(--ink);
   white-space: nowrap;
+}
+
+/* =========================================================
+   DATE NAV (browse results day by day)
+   ========================================================= */
+
+.date-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 14px 15px;
+  border-bottom: 1px solid var(--line);
+  background: #fafcfb;
+}
+
+.date-nav button {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: white;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.date-nav button:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--green);
+}
+
+.date-nav button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.date-nav span {
+  font-size: 12px;
+  font-weight: 950;
+  color: var(--ink);
+  min-width: 160px;
+  text-align: center;
 }

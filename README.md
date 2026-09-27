@@ -1,22 +1,35 @@
 # YepTennis — live ATP/WTA version
 
 ## What is live
-- Today's ATP and WTA singles fixtures/results
+- ATP and WTA singles fixtures/results, browsable **day by day** via
+  `/api/results?date=YYYY-MM-DD` (the Results section has ←/→ day navigation)
+- Filter results by tour (ATP/WTA), status (LIVE/COMPLETED), and by
+  tournament level (**Grand Slam / 1000 / 500 / 250**) — the same
+  classification is shared by results and the calendar
 - Live-match updates where the API plan exposes the live endpoint
-- ATP/WTA Masters calendar (rendered under **Calendar**)
-- ATP/WTA rankings (rendered under **Rankings**)
+- Tournament calendar covering Grand Slams, 1000s, 500s, and 250s
+  (rendered under **Calendar**)
+- ATP/WTA rankings, **top 20**, each with a link to more information about
+  the player (rendered under **Rankings**)
 - Tennis news from BBC Sport Tennis RSS and ATP Tour RSS
-- Browser refresh of today's results every 60 seconds
+- Browser refresh of today's results every 60 seconds (only while viewing
+  today — past dates are already final and aren't re-fetched)
 
 ## RapidAPI quota protection
 The worker caches every RapidAPI response in a Cloudflare KV namespace so the
 upstream API is only actually called on a schedule, no matter how many
-visitors hit the site or how often the browser polls:
+visitors hit the site, how often the browser polls, or how many past dates
+someone browses:
 
-- `/api/today` and `/api/debug` — refetched at most **every 12 hours**
-  (≈2 calls/day)
+- `/api/results` (today) and `/api/debug` — refetched at most **every 12
+  hours** (≈2 calls/day)
+- `/api/results` for any **past** date — cached for **7 days**, since a
+  finished day's results don't change
 - `/api/calendar` and `/api/rankings` — refetched at most **every 24 hours**
   (≈1 call/day each)
+- A Cloudflare Cron Trigger (`triggers.crons` in `wrangler.json`, every 4
+  hours) pre-warms today's cache in the background, so visitors almost
+  never trigger the live upstream call themselves
 
 The 60-second browser refresh only re-reads the worker's own cache, so it does
 not add extra load against your RapidAPI plan.

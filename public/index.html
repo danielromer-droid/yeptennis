@@ -141,24 +141,37 @@
     <div class="section-intro">
       <div>
         <span class="eyebrow">LIVE & RECENT</span>
-        <h2>Today's Results</h2>
+        <h2>Results</h2>
       </div>
       <span class="api-date"></span>
     </div>
 
     <div class="results-card">
+
+      <div class="date-nav">
+        <button id="date-prev" type="button" aria-label="Previous day">←</button>
+        <span id="date-label">Today</span>
+        <button id="date-next" type="button" aria-label="Next day" disabled>→</button>
+      </div>
+
       <div class="tabs" id="results-tabs">
-        <button class="selected" data-date="today" type="button">TODAY</button>
-        <button data-date="yesterday" type="button">YESTERDAY</button>
-        <button data-filter="all" type="button">ALL</button>
+        <button class="selected" data-filter="all" type="button">ALL</button>
         <button data-filter="atp" type="button">ATP</button>
         <button data-filter="wta" type="button">WTA</button>
         <button data-filter="live" type="button">LIVE</button>
         <button data-filter="completed" type="button">COMPLETED</button>
       </div>
 
+      <div class="tabs" id="level-tabs">
+        <button class="selected" data-level="all" type="button">ALL LEVELS</button>
+        <button data-level="Grand Slam" type="button">GRAND SLAM</button>
+        <button data-level="1000" type="button">1000</button>
+        <button data-level="500" type="button">500</button>
+        <button data-level="250" type="button">250</button>
+      </div>
+
       <div id="results-list">
-        <div class="loading">Loading today's results...</div>
+        <div class="loading">Loading results...</div>
       </div>
     </div>
   </section>
@@ -246,6 +259,7 @@
         <span class="eyebrow">SINGLES</span>
         <h2>Rankings</h2>
       </div>
+      <span class="news-source">Top 20 · tap ⓘ for player info</span>
     </div>
 
     <div class="results-card rankings-card">
@@ -266,8 +280,9 @@
     <div class="section-intro">
       <div>
         <span class="eyebrow">UPCOMING</span>
-        <h2>Masters Calendar</h2>
+        <h2>Tournament Calendar</h2>
       </div>
+      <span class="news-source">Grand Slams · 1000 · 500 · 250</span>
     </div>
 
     <div class="results-card">
