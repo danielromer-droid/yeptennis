@@ -1,4 +1,4 @@
-const VERSION = "YepTennis Worker 2026-09-26.4";
+const VERSION = "YepTennis Worker 2026-09-26.5";
 
 const HOST = "tennis-api-atp-wta-itf.p.rapidapi.com";
 const BASE = `https://${HOST}`;
@@ -8,8 +8,8 @@ const BASE = `https://${HOST}`;
 
    Every one of these is a call that counts against the
    RapidAPI monthly quota. To stay under a free/low plan,
-   we cache each endpoint in Cloudflare's edge Cache API so the
-   upstream API is only actually hit once per TTL, no matter how
+   we cache each endpoint in Cloudflare KV so the upstream
+   API is only actually hit once per TTL, no matter how
    many visitors load the site or how often the browser
    polls the worker.
 
@@ -32,38 +32,27 @@ const J = (x, s = 200) =>
   });
 
 /* =====================================================
-   EDGE CACHE WRAPPER
+   KV CACHE WRAPPER
 
-   Uses Cloudflare's built-in Cache API. No KV namespace is
-   required, so wrangler.json remains deployable without a
-   placeholder namespace ID.
+   If env.TENNIS_CACHE isn't bound yet (not configured in
+   wrangler.json / dashboard), this quietly falls back to
+   calling the upstream API directly every time, so the
+   site still works while you set the KV namespace up.
    ===================================================== */
 
 async function cached(env, key, ttlSeconds, fetcher) {
-  /*
-     Use Cloudflare's built-in Cache API so the project does not require a
-     KV namespace just to deploy. The cache is shared at the edge and keeps
-     repeated visitor requests from calling RapidAPI again and again.
+  const kv = env.TENNIS_CACHE;
 
-     If the edge cache has no copy yet, fetch the upstream data once and
-     store the JSON response with the requested TTL.
-  */
+  if (kv) {
+    try {
+      const hit = await kv.get(key, "json");
 
-  const cache = caches.default;
-  const cacheKey = new Request(
-    `https://yeptennis.com/__yeptennis_cache/${encodeURIComponent(key)}`
-  );
-
-  try {
-    const hit = await cache.match(cacheKey);
-
-    if (hit) {
-      const data = await hit.json();
-      return { ...data, cached: true };
+      if (hit) {
+        return { ...hit, cached: true };
+      }
+    } catch {
+      /* KV read failed - fall through to a live fetch */
     }
-  }
-  catch {
-    /* Cache read failure - fall through to a live fetch. */
   }
 
   const fresh = await fetcher();
@@ -74,21 +63,31 @@ async function cached(env, key, ttlSeconds, fetcher) {
     cachedAt: new Date().toISOString()
   };
 
-  try {
-    const response = new Response(
-      JSON.stringify(payload),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          "cache-control": `public, max-age=${ttlSeconds}`
-        }
-      }
-    );
-
-    await cache.put(cacheKey, response);
+  if (kv) {
+    try {
+      await kv.put(key, JSON.stringify(payload), {
+        expirationTtl: ttlSeconds
+      });
+    } catch {
+      /* KV write failed - not fatal, just no caching this round */
+    }
   }
-  catch {
-    /* Cache write failure - the API response itself is still valid. */
+
+  return payload;
+}
+
+async function refreshCache(env, key, ttlSeconds, fetcher) {
+  const fresh = await fetcher();
+  const payload = {
+    ...fresh,
+    cached: false,
+    cachedAt: new Date().toISOString()
+  };
+
+  if (env.TENNIS_CACHE) {
+    await env.TENNIS_CACHE.put(key, JSON.stringify(payload), {
+      expirationTtl: ttlSeconds
+    });
   }
 
   return payload;
@@ -534,104 +533,32 @@ async function today(env) {
    DEBUG (also cached - it hits the same upstream routes)
    ===================================================== */
 
-async function fetchDebug(env, d) {
+async function debug(env) {
+  const d = new Date().toISOString().slice(0, 10);
+  const key = `today:${d}`;
+  let cachedToday = null;
+  let error = null;
 
-  const atpPath =
-    `/tennis/v2/atp/fixtures/${d}?include=round,tournament&pageNo=1&pageSize=100&filter=PlayerGroup:singles`;
-
-  const wtaPath =
-    `/tennis/v2/wta/fixtures/${d}?include=round,tournament&pageNo=1&pageSize=100&filter=PlayerGroup:singles`;
-
-  const [
-    atp,
-    wta
-  ] =
-    await Promise.allSettled([
-
-      call(
-        atpPath,
-        env
-      ),
-
-      call(
-        wtaPath,
-        env
-      )
-
-    ]);
-
+  if (env.TENNIS_CACHE) {
+    try {
+      cachedToday = await env.TENNIS_CACHE.get(key, "json");
+    } catch (e) {
+      error = e.message || String(e);
+    }
+  }
 
   return {
     ok: true,
-
     version: VERSION,
-
     date: d,
-
-    atp: {
-      status: atp.status,
-
-      count:
-        atp.status === "fulfilled"
-          ? arr(atp.value).length
-          : 0,
-
-      first:
-        atp.status === "fulfilled"
-          ? (
-              arr(atp.value)[0] ||
-              null
-            )
-          : null,
-
-      error:
-        atp.status === "rejected"
-          ? String(
-              atp.reason?.message ||
-              atp.reason
-            )
-          : null
-    },
-
-    wta: {
-      status: wta.status,
-
-      count:
-        wta.status === "fulfilled"
-          ? arr(wta.value).length
-          : 0,
-
-      first:
-        wta.status === "fulfilled"
-          ? (
-              arr(wta.value)[0] ||
-              null
-            )
-          : null,
-
-      error:
-        wta.status === "rejected"
-          ? String(
-              wta.reason?.message ||
-              wta.reason
-            )
-          : null
-    }
+    cacheConfigured: Boolean(env.TENNIS_CACHE),
+    cached: Boolean(cachedToday),
+    cachedAt: cachedToday?.cachedAt || null,
+    count: cachedToday?.count || 0,
+    atpCount: cachedToday?.matches?.filter(x => x.tour === "atp").length || 0,
+    wtaCount: cachedToday?.matches?.filter(x => x.tour === "wta").length || 0,
+    error
   };
-}
-
-async function debug(env) {
-
-  const d = new Date()
-    .toISOString()
-    .slice(0, 10);
-
-  return cached(
-    env,
-    `debug:${d}`,
-    DEBUG_TTL,
-    () => fetchDebug(env, d)
-  );
 }
 
 
@@ -893,9 +820,6 @@ function xml(xml, source) {
         title:
           g("title"),
 
-        description:
-          g("description"),
-
         link:
           clean(link),
 
@@ -995,6 +919,46 @@ async function news() {
    ===================================================== */
 
 export default {
+
+  async scheduled(event, env, ctx) {
+    const now = new Date();
+    const d = now.toISOString().slice(0, 10);
+
+    // Six times per day: refresh today's ATP/WTA data.
+    ctx.waitUntil((async () => {
+      await refreshCache(
+        env,
+        `today:${d}`,
+        TODAY_TTL,
+        () => fetchToday(env, d)
+      );
+
+      // Once per day (the 00:00 UTC run), refresh calendar and rankings.
+      if (now.getUTCHours() === 0) {
+        const y = now.getUTCFullYear();
+        await Promise.all([
+          refreshCache(
+            env,
+            `calendar:${y}`,
+            CALENDAR_TTL,
+            () => fetchCalendar(env, y)
+          ),
+          refreshCache(
+            env,
+            `rankings:atp`,
+            RANKINGS_TTL,
+            () => fetchRankings(env, "atp")
+          ),
+          refreshCache(
+            env,
+            `rankings:wta`,
+            RANKINGS_TTL,
+            () => fetchRankings(env, "wta")
+          )
+        ]);
+      }
+    })().catch(() => {}));
+  },
 
   async fetch(req, env) {
 
