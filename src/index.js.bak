@@ -1,4 +1,4 @@
-const VERSION = "YepTennis Worker 2026-09-27.6";
+const VERSION = "YepTennis Worker 2026-09-26.5";
 
 const HOST = "tennis-api-atp-wta-itf.p.rapidapi.com";
 const BASE = `https://${HOST}`;
@@ -21,7 +21,6 @@ const TODAY_TTL = 12 * 60 * 60;
 const CALENDAR_TTL = 24 * 60 * 60;
 const RANKINGS_TTL = 24 * 60 * 60;
 const DEBUG_TTL = TODAY_TTL;
-const YESTERDAY_TTL = 48 * 60 * 60;
 
 const J = (x, s = 200) =>
   new Response(JSON.stringify(x), {
@@ -127,18 +126,16 @@ async function call(path, env) {
   return d;
 }
 
-const arr = d => {
-  if (Array.isArray(d)) return d;
-  if (Array.isArray(d?.data)) return d.data;
-  if (Array.isArray(d?.results)) return d.results;
-  if (Array.isArray(d?.result)) return d.result;
-  if (Array.isArray(d?.players)) return d.players;
-  if (Array.isArray(d?.rankings)) return d.rankings;
-  if (Array.isArray(d?.data?.players)) return d.data.players;
-  if (Array.isArray(d?.data?.rankings)) return d.data.rankings;
-  if (Array.isArray(d?.data?.results)) return d.data.results;
-  return [];
-};
+const arr = d =>
+  Array.isArray(d)
+    ? d
+    : Array.isArray(d?.data)
+      ? d.data
+      : Array.isArray(d?.results)
+        ? d.results
+        : Array.isArray(d?.result)
+          ? d.result
+          : [];
 
 const val = (o, keys, fallback = "") => {
   for (const k of keys) {
@@ -155,8 +152,6 @@ const val = (o, keys, fallback = "") => {
 };
 
 const player = p => {
-  if (p?.player && typeof p.player === "object") p = { ...p.player, ...p };
-
   if (typeof p === "string") {
     return {
       name: p,
@@ -534,20 +529,6 @@ async function today(env) {
 }
 
 
-async function yesterday(env) {
-  const d = new Date(Date.now() - 24 * 60 * 60 * 1000)
-    .toISOString()
-    .slice(0, 10);
-
-  return cached(
-    env,
-    `yesterday:${d}`,
-    YESTERDAY_TTL,
-    () => fetchToday(env, d)
-  );
-}
-
-
 /* =====================================================
    DEBUG (also cached - it hits the same upstream routes)
    ===================================================== */
@@ -686,20 +667,10 @@ async function fetchRankings(env, tour) {
 }
 
 async function rankings(env, tour) {
-  const key = `rankings:${tour}`;
 
-  if (env.TENNIS_CACHE) {
-    try {
-      const hit = await env.TENNIS_CACHE.get(key, "json");
-      if (hit && Array.isArray(hit.players) && hit.players.length) {
-        return { ...hit, cached: true };
-      }
-    } catch {}
-  }
-
-  return refreshCache(
+  return cached(
     env,
-    key,
+    `rankings:${tour}`,
     RANKINGS_TTL,
     () => fetchRankings(env, tour)
   );
@@ -962,19 +933,6 @@ export default {
         () => fetchToday(env, d)
       );
 
-      // At 08:00 UTC, refresh yesterday's completed results once.
-      if (now.getUTCHours() === 8) {
-        const yd = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-          .toISOString()
-          .slice(0, 10);
-        await refreshCache(
-          env,
-          `yesterday:${yd}`,
-          YESTERDAY_TTL,
-          () => fetchToday(env, yd)
-        );
-      }
-
       // Once per day (the 00:00 UTC run), refresh calendar and rankings.
       if (now.getUTCHours() === 0) {
         const y = now.getUTCFullYear();
@@ -1062,26 +1020,6 @@ export default {
 
       }
 
-
-      /* YESTERDAY */
-
-      if (u.pathname === "/api/yesterday") {
-        return J(await yesterday(env));
-      }
-
-      /* RANKINGS DEBUG */
-
-      if (u.pathname === "/api/rankings-debug") {
-        const atp = env.TENNIS_CACHE ? await env.TENNIS_CACHE.get("rankings:atp", "json") : null;
-        const wta = env.TENNIS_CACHE ? await env.TENNIS_CACHE.get("rankings:wta", "json") : null;
-        return J({
-          ok: true,
-          version: VERSION,
-          cacheConfigured: Boolean(env.TENNIS_CACHE),
-          atp: { cached: Boolean(atp), count: atp?.players?.length || 0, cachedAt: atp?.cachedAt || null },
-          wta: { cached: Boolean(wta), count: wta?.players?.length || 0, cachedAt: wta?.cachedAt || null }
-        });
-      }
 
       /* TODAY */
 

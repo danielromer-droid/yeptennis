@@ -4,8 +4,6 @@
    ========================================================= */
 
 let todayData = null;
-let yesterdayData = null;
-let resultsDate = "today";
 let calendarData = null;
 let newsData = null;
 let rankingsData = { atp: null, wta: null };
@@ -68,29 +66,21 @@ function setupNavigation() {
 
 function setupResultTabs() {
 
-  const tabs = document.querySelectorAll("#results-tabs button");
+  const tabs = document.querySelectorAll(".results-card .tabs button");
 
   if (!tabs.length) return;
 
   tabs.forEach(button => {
 
-    button.addEventListener("click", async () => {
+    button.addEventListener("click", () => {
 
       tabs.forEach(b => b.classList.remove("selected"));
+
       button.classList.add("selected");
 
-      if (button.dataset.date) {
-        resultsDate = button.dataset.date;
-        resultsFilter = "all";
+      resultsFilter = button.dataset.filter || "all";
 
-        if (resultsDate === "yesterday") {
-          if (!yesterdayData) await loadYesterday();
-          else { renderResults(); updateResultsDate(); }
-        } else {
-          if (!todayData) await loadToday();
-          else { renderResults(); updateResultsDate(); }
-        }
-      }
+      renderResults();
 
     });
 
@@ -168,34 +158,41 @@ async function fetchJSON(url) {
    ========================================================= */
 
 async function loadToday() {
+
+  const container =
+    document.getElementById("results-list") ||
+    document.querySelector(".results-card");
+
+  if (!container) return;
+
   try {
+
     todayData = await fetchJSON("/api/today");
-    if (resultsDate === "today") {
-      renderResults();
-      updateResultsDate();
-    }
-  } catch (error) {
+
+    renderResults();
+
+    updateResultsDate();
+
+  }
+  catch (error) {
+
     console.error("YepTennis /api/today:", error);
-    showResultsError();
-  }
-}
 
-async function loadYesterday() {
-  try {
-    yesterdayData = await fetchJSON("/api/yesterday");
-    if (resultsDate === "yesterday") {
-      renderResults();
-      updateResultsDate();
+    const list =
+      document.getElementById("results-list");
+
+    if (list && !todayData) {
+
+      list.innerHTML = `
+        <div class="api-message">
+          Results temporarily unavailable.
+        </div>
+      `;
+
     }
-  } catch (error) {
-    console.error("YepTennis /api/yesterday:", error);
-    showResultsError();
-  }
-}
 
-function showResultsError() {
-  const list = document.getElementById("results-list");
-  if (list) list.innerHTML = `<div class="api-message">Results temporarily unavailable.</div>`;
+  }
+
 }
 
 
@@ -247,12 +244,11 @@ function matchCategory(match) {
 
 function renderResults() {
 
-  const activeData = resultsDate === "yesterday" ? yesterdayData : todayData;
-  if (!activeData) return;
+  if (!todayData) return;
 
   const matches =
-    Array.isArray(activeData.matches)
-      ? activeData.matches
+    Array.isArray(todayData.matches)
+      ? todayData.matches
       : [];
 
 
@@ -514,10 +510,11 @@ function updateResultsDate() {
 
   if (!el) return;
 
-  const activeData = resultsDate === "yesterday" ? yesterdayData : todayData;
+  if (todayData?.date) {
 
-  if (activeData?.date) {
-    el.textContent = `▣ ${formatDate(activeData.date)}`;
+    el.textContent =
+      `▣ ${formatDate(todayData.date)}`;
+
   }
 
 }
