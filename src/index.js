@@ -1,9 +1,9 @@
 /* =========================================================
    YepTennis Worker
-   Version: 2026-09-27.9
+   Version: 2026-09-27.10
    ========================================================= */
 
-const VERSION = "YepTennis Worker 2026-09-27.9";
+const VERSION = "YepTennis Worker 2026-09-27.10";
 
 const RAPIDAPI_HOST =
   "tennis-api-atp-wta-itf.p.rapidapi.com";
@@ -11,19 +11,18 @@ const RAPIDAPI_HOST =
 const RAPIDAPI_BASE =
   "https://" + RAPIDAPI_HOST;
 
-const CACHE_TTL = 60 * 60 * 12; // 12 hours
+const CACHE_TTL = 60 * 60 * 12;
 
 /* =========================================================
    BASIC HELPERS
    ========================================================= */
 
-function json(data, status = 200, extraHeaders = {}) {
+function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-      ...extraHeaders
+      "cache-control": "no-store"
     }
   });
 }
@@ -42,14 +41,56 @@ function yearUTC() {
   return new Date().getUTCFullYear();
 }
 
+/* =========================================================
+   API RESPONSE ARRAY EXTRACTION
+   ========================================================= */
+
 function arr(v) {
   if (Array.isArray(v)) return v;
 
-  if (v && Array.isArray(v.data)) return v.data;
-  if (v && Array.isArray(v.results)) return v.results;
-  if (v && Array.isArray(v.items)) return v.items;
-  if (v && Array.isArray(v.matches)) return v.matches;
-  if (v && Array.isArray(v.fixtures)) return v.fixtures;
+  if (!v || typeof v !== "object") {
+    return [];
+  }
+
+  if (Array.isArray(v.data)) {
+    return v.data;
+  }
+
+  if (v.data && typeof v.data === "object") {
+    if (Array.isArray(v.data.data)) {
+      return v.data.data;
+    }
+
+    if (Array.isArray(v.data.items)) {
+      return v.data.items;
+    }
+
+    if (Array.isArray(v.data.results)) {
+      return v.data.results;
+    }
+
+    if (Array.isArray(v.data.matches)) {
+      return v.data.matches;
+    }
+
+    return [v.data];
+  }
+
+  if (Array.isArray(v.results)) {
+    return v.results;
+  }
+
+  if (Array.isArray(v.items)) {
+    return v.items;
+  }
+
+  if (Array.isArray(v.matches)) {
+    return v.matches;
+  }
+
+  if (Array.isArray(v.fixtures)) {
+    return v.fixtures;
+  }
 
   return [];
 }
@@ -77,18 +118,28 @@ function val(obj, keys, fallback = null) {
    ========================================================= */
 
 async function getCache(env, key) {
-  if (!env.TENNIS_CACHE) return null;
+  if (!env.TENNIS_CACHE) {
+    return null;
+  }
 
   try {
-    const value = await env.TENNIS_CACHE.get(key, "json");
-    return value || null;
-  } catch (e) {
+    return await env.TENNIS_CACHE.get(
+      key,
+      "json"
+    );
+  } catch {
     return null;
   }
 }
 
-async function putCache(env, key, value) {
-  if (!env.TENNIS_CACHE) return false;
+async function putCache(
+  env,
+  key,
+  value
+) {
+  if (!env.TENNIS_CACHE) {
+    return false;
+  }
 
   try {
     await env.TENNIS_CACHE.put(
@@ -100,7 +151,7 @@ async function putCache(env, key, value) {
     );
 
     return true;
-  } catch (e) {
+  } catch {
     return false;
   }
 }
@@ -109,29 +160,38 @@ async function putCache(env, key, value) {
    RAPIDAPI
    ========================================================= */
 
-async function call(path, env) {
-  const key = env.TENNIS_API_KEY;
-
-  if (!key) {
-    throw new Error("Missing TENNIS_API_KEY");
+async function call(
+  path,
+  env
+) {
+  if (!env.TENNIS_API_KEY) {
+    throw new Error(
+      "Missing TENNIS_API_KEY"
+    );
   }
 
-  const response = await fetch(
-    RAPIDAPI_BASE + path,
-    {
-      headers: {
-        "x-rapidapi-host": RAPIDAPI_HOST,
-        "x-rapidapi-key": key
-      }
-    }
-  );
+  const response =
+    await fetch(
+      RAPIDAPI_BASE + path,
+      {
+        headers: {
+          "x-rapidapi-host":
+            RAPIDAPI_HOST,
 
-  const text = await response.text();
+          "x-rapidapi-key":
+            env.TENNIS_API_KEY
+        }
+      }
+    );
+
+  const text =
+    await response.text();
 
   let data;
 
   try {
-    data = JSON.parse(text);
+    data =
+      JSON.parse(text);
   } catch {
     data = {
       raw: text
@@ -151,29 +211,11 @@ async function call(path, env) {
 }
 
 /* =========================================================
-   PLAYER
-   IMPORTANT:
-   ATP ranking data has player nested inside "player".
+   PLAYER PARSER
    ========================================================= */
 
 function player(p) {
-  const q =
-    p?.player &&
-    typeof p.player === "object"
-      ? p.player
-      : p;
-
-  if (typeof q === "string") {
-    return {
-      id: null,
-      name: q,
-      country: "",
-      rank: null,
-      points: 0
-    };
-  }
-
-  if (!q || typeof q !== "object") {
+  if (!p) {
     return {
       id: null,
       name: "Player",
@@ -183,40 +225,130 @@ function player(p) {
     };
   }
 
-  return {
-    id: val(
+  /*
+     The API can return players in several structures.
+
+     Examples:
+
+     {
+       player: {
+         id,
+         name,
+         countryAcr
+       }
+     }
+
+     or:
+
+     {
+       player: {
+         player: {
+           id,
+           name,
+           countryAcr
+         }
+       }
+     }
+
+     or a flat object.
+  */
+
+  let q = p;
+
+  if (
+    q.player &&
+    typeof q.player === "object"
+  ) {
+    q = q.player;
+  }
+
+  if (
+    q.player &&
+    typeof q.player === "object"
+  ) {
+    q = q.player;
+  }
+
+  if (
+    typeof q === "string"
+  ) {
+    return {
+      id: null,
+      name: q,
+      country: "",
+      rank: null,
+      points: 0
+    };
+  }
+
+  const id =
+    val(
       q,
       [
         "id",
         "playerId",
-        "playerID"
+        "playerID",
+        "player_id"
       ],
-      null
-    ),
+      val(
+        p,
+        [
+          "id",
+          "playerId",
+          "playerID",
+          "player_id"
+        ],
+        null
+      )
+    );
 
-    name: val(
+  const name =
+    val(
       q,
       [
         "name",
         "playerName",
         "fullName",
-        "displayName"
+        "displayName",
+        "shortName"
       ],
-      "Player"
-    ),
+      val(
+        p,
+        [
+          "name",
+          "playerName",
+          "fullName",
+          "displayName",
+          "shortName"
+        ],
+        "Player"
+      )
+    );
 
-    country: val(
+  const country =
+    val(
       q,
       [
         "countryAcr",
-        "country",
         "countryCode",
-        "countryCodeAcr"
+        "countryCodeAcr",
+        "country",
+        "countryName"
       ],
-      ""
-    ),
+      val(
+        p,
+        [
+          "countryAcr",
+          "countryCode",
+          "countryCodeAcr",
+          "country"
+        ],
+        ""
+      )
+    );
 
-    rank: val(
+  const rank =
+    val(
       p,
       [
         "currentRank",
@@ -232,9 +364,10 @@ function player(p) {
         ],
         null
       )
-    ),
+    );
 
-    points: Number(
+  const points =
+    Number(
       val(
         p,
         [
@@ -252,7 +385,14 @@ function player(p) {
           0
         )
       ) || 0
-    )
+    );
+
+  return {
+    id,
+    name,
+    country,
+    rank,
+    points
   };
 }
 
@@ -267,72 +407,162 @@ function extractScore(m) {
     m?.scores ||
     {};
 
-  if (typeof score === "string") {
+  if (
+    typeof score === "string"
+  ) {
     return score;
+  }
+
+  const display =
+    val(
+      score,
+      [
+        "display",
+        "text",
+        "score"
+      ],
+      ""
+    );
+
+  if (display) {
+    return display;
   }
 
   const sets =
     score?.sets ||
     score?.setScores ||
-    m?.setScores;
+    m?.setScores ||
+    m?.sets;
 
   if (Array.isArray(sets)) {
     return sets
       .map(s => {
-        if (typeof s === "string") return s;
+        if (
+          typeof s === "string"
+        ) {
+          return s;
+        }
 
-        const a = val(
-          s,
-          [
-            "player1",
-            "home",
-            "homeScore",
-            "score1",
-            "p1"
-          ],
-          ""
-        );
+        const a =
+          val(
+            s,
+            [
+              "player1",
+              "home",
+              "homeScore",
+              "score1",
+              "p1"
+            ],
+            ""
+          );
 
-        const b = val(
-          s,
-          [
-            "player2",
-            "away",
-            "awayScore",
-            "score2",
-            "p2"
-          ],
-          ""
-        );
+        const b =
+          val(
+            s,
+            [
+              "player2",
+              "away",
+              "awayScore",
+              "score2",
+              "p2"
+            ],
+            ""
+          );
 
-        return a !== "" || b !== ""
-          ? `${a}-${b}`
-          : "";
+        if (
+          a !== "" ||
+          b !== ""
+        ) {
+          return `${a}-${b}`;
+        }
+
+        return "";
       })
       .filter(Boolean)
       .join(" ");
   }
 
-  const direct =
-    val(
-      score,
-      [
-        "display",
-        "score",
-        "text"
-      ],
-      ""
-    );
-
-  return direct || "";
+  return "";
 }
 
 /* =========================================================
-   MATCH NORMALISER
+   TOURNAMENT
    ========================================================= */
 
-function match(m, tour) {
-  if (!m || typeof m !== "object") {
+function tournamentInfo(m) {
+  const t =
+    m?.tournament ||
+    m?.event ||
+    m?.competition ||
+    {};
+
+  if (
+    typeof t === "string"
+  ) {
+    return {
+      name: t,
+      id:
+        val(
+          m,
+          [
+            "tournamentId",
+            "eventId"
+          ],
+          null
+        )
+    };
+  }
+
+  return {
+    name:
+      val(
+        t,
+        [
+          "name",
+          "tournamentName",
+          "title"
+        ],
+        val(
+          m,
+          [
+            "tournamentName",
+            "eventName"
+          ],
+          ""
+        )
+      ),
+
+    id:
+      val(
+        t,
+        [
+          "id",
+          "tournamentId"
+        ],
+        val(
+          m,
+          [
+            "tournamentId",
+            "eventId"
+          ],
+          null
+        )
+      )
+  };
+}
+
+/* =========================================================
+   MATCH
+   ========================================================= */
+
+function match(
+  m,
+  tour
+) {
+  if (
+    !m ||
+    typeof m !== "object"
+  ) {
     return null;
   }
 
@@ -342,6 +572,7 @@ function match(m, tour) {
     m.homePlayer ||
     m.home ||
     m.playerA ||
+    m.firstPlayer ||
     {};
 
   const p2 =
@@ -350,78 +581,17 @@ function match(m, tour) {
     m.awayPlayer ||
     m.away ||
     m.playerB ||
+    m.secondPlayer ||
     {};
 
-  const a = player(p1);
-  const b = player(p2);
+  const a =
+    player(p1);
 
-  const tournament =
-    m.tournament ||
-    m.event ||
-    m.competition ||
-    {};
+  const b =
+    player(p2);
 
-  const tournamentName =
-    typeof tournament === "string"
-      ? tournament
-      : val(
-          tournament,
-          [
-            "name",
-            "tournamentName",
-            "title"
-          ],
-          val(
-            m,
-            [
-              "tournamentName",
-              "eventName"
-            ],
-            ""
-          )
-        );
-
-  const tournamentId =
-    typeof tournament === "object"
-      ? val(
-          tournament,
-          [
-            "id",
-            "tournamentId"
-          ],
-          null
-        )
-      : val(
-          m,
-          [
-            "tournamentId",
-            "eventId"
-          ],
-          null
-        );
-
-  const date =
-    val(
-      m,
-      [
-        "date",
-        "startTime",
-        "startDate",
-        "scheduledAt"
-      ],
-      null
-    );
-
-  const status =
-    val(
-      m,
-      [
-        "status",
-        "matchStatus",
-        "state"
-      ],
-      ""
-    );
+  const t =
+    tournamentInfo(m);
 
   const round =
     m.round ||
@@ -430,21 +600,41 @@ function match(m, tour) {
     "";
 
   return {
-    id: val(
-      m,
-      [
-        "id",
-        "matchId",
-        "fixtureId"
-      ],
-      null
-    ),
+    id:
+      val(
+        m,
+        [
+          "id",
+          "matchId",
+          "fixtureId"
+        ],
+        null
+      ),
 
     tour,
 
-    date,
+    date:
+      val(
+        m,
+        [
+          "date",
+          "startTime",
+          "startDate",
+          "scheduledAt"
+        ],
+        null
+      ),
 
-    status,
+    status:
+      val(
+        m,
+        [
+          "status",
+          "matchStatus",
+          "state"
+        ],
+        ""
+      ),
 
     round:
       typeof round === "object"
@@ -459,15 +649,18 @@ function match(m, tour) {
           )
         : round,
 
-    tournament: tournamentName,
+    tournament:
+      t.name,
 
-    tournamentId,
+    tournamentId:
+      t.id,
 
     player1: a,
 
     player2: b,
 
-    score: extractScore(m),
+    score:
+      extractScore(m),
 
     winner:
       val(
@@ -485,150 +678,16 @@ function match(m, tour) {
    FIXTURES
    ========================================================= */
 
-async function fetchFixtures(env, tour, date) {
-  const path =
-    `/tennis/v2/${tour}/fixtures/${date}`;
-
-  const data = await call(path, env);
-
-  return arr(data)
-    .map(x => match(x, tour.toUpperCase()))
-    .filter(Boolean);
-}
-
-/* =========================================================
-   LIVE
-   ========================================================= */
-
-async function fetchLive(env) {
-  const result = {
-    atp: [],
-    wta: [],
-    matches: [],
-    updated: nowISO()
-  };
-
-  const tours = ["atp", "wta"];
-
-  for (const tour of tours) {
-    try {
-      const data = await call(
-        `/tennis/v2/${tour}/fixtures/live`,
-        env
-      );
-
-      const rows = arr(data)
-        .map(x =>
-          match(
-            x,
-            tour.toUpperCase()
-          )
-        )
-        .filter(Boolean);
-
-      result[tour] = rows;
-      result.matches.push(...rows);
-    } catch (e) {
-      // Keep other tour alive.
-    }
-  }
-
-  return result;
-}
-
-/* =========================================================
-   TODAY
-   ========================================================= */
-
-async function refreshToday(env, date) {
-  const [atpResult, wtaResult] =
-    await Promise.allSettled([
-      fetchFixtures(env, "atp", date),
-      fetchFixtures(env, "wta", date)
-    ]);
-
-  const atp =
-    atpResult.status === "fulfilled"
-      ? atpResult.value
-      : [];
-
-  const wta =
-    wtaResult.status === "fulfilled"
-      ? wtaResult.value
-      : [];
-
-  const live =
-    await fetchLive(env);
-
-  const payload = {
-    ok: true,
-    date,
-    version: VERSION,
-    atp,
-    wta,
-    matches: [
-      ...atp,
-      ...wta
-    ],
-    live: live.matches || [],
-    updated: nowISO()
-  };
-
-  await putCache(
-    env,
-    `today:${date}:atp`,
-    {
-      ok: true,
-      date,
-      tour: "ATP",
-      matches: atp,
-      updated: payload.updated
-    }
-  );
-
-  await putCache(
-    env,
-    `today:${date}:wta`,
-    {
-      ok: true,
-      date,
-      tour: "WTA",
-      matches: wta,
-      updated: payload.updated
-    }
-  );
-
-  await putCache(
-    env,
-    `live:${date}`,
-    live
-  );
-
-  // Keep a combined copy for compatibility
-  // with the previous Worker version.
-  await putCache(
-    env,
-    `today:${date}`,
-    payload
-  );
-
-  return payload;
-}
-
-/* =========================================================
-   RESULTS / YESTERDAY
-   ========================================================= */
-
-async function fetchResults(
+async function fetchFixtures(
   env,
   tour,
-  start,
-  end
+  date
 ) {
-  const path =
-    `/tennis/v2/${tour}/results/${start}/${end}`;
-
-  const data = await call(path, env);
+  const data =
+    await call(
+      `/tennis/v2/${tour}/fixtures/${date}?PlayerGroup=singles`,
+      env
+    );
 
   return arr(data)
     .map(x =>
@@ -640,35 +699,136 @@ async function fetchResults(
     .filter(Boolean);
 }
 
-async function refreshYesterday(
+/* =========================================================
+   RESULTS
+   ========================================================= */
+
+async function fetchResults(
+  env,
+  tour,
+  date
+) {
+  const data =
+    await call(
+      `/tennis/v2/${tour}/results/${date}?PlayerGroup=singles`,
+      env
+    );
+
+  return arr(data)
+    .map(x =>
+      match(
+        x,
+        tour.toUpperCase()
+      )
+    )
+    .filter(Boolean);
+}
+
+/* =========================================================
+   LIVE
+   ========================================================= */
+
+async function fetchLive(
+  env
+) {
+  const result = {
+    atp: [],
+    wta: [],
+    matches: [],
+    updated: nowISO()
+  };
+
+  for (
+    const tour of [
+      "atp",
+      "wta"
+    ]
+  ) {
+    try {
+      const data =
+        await call(
+          `/tennis/v2/${tour}/fixtures/live?PlayerGroup=singles`,
+          env
+        );
+
+      const rows =
+        arr(data)
+          .map(x =>
+            match(
+              x,
+              tour.toUpperCase()
+            )
+          )
+          .filter(Boolean);
+
+      result[tour] =
+        rows;
+
+      result.matches.push(
+        ...rows
+      );
+    } catch {
+      // Keep the other tour.
+    }
+  }
+
+  return result;
+}
+
+/* =========================================================
+   REFRESH TODAY
+   ========================================================= */
+
+async function refreshToday(
   env,
   date
 ) {
-  const atpResult =
+  const [
+    atpResult,
+    wtaResult
+  ] =
     await Promise.allSettled([
-      fetchResults(
+      fetchFixtures(
         env,
         "atp",
-        date,
         date
       ),
-      fetchResults(
+
+      fetchFixtures(
         env,
         "wta",
-        date,
         date
       )
     ]);
 
   const atp =
-    atpResult[0].status === "fulfilled"
-      ? atpResult[0].value
+    atpResult.status ===
+    "fulfilled"
+      ? atpResult.value
       : [];
 
   const wta =
-    atpResult[1].status === "fulfilled"
-      ? atpResult[1].value
+    wtaResult.status ===
+    "fulfilled"
+      ? wtaResult.value
       : [];
+
+  let live = {
+    atp: [],
+    wta: [],
+    matches: [],
+    updated: nowISO()
+  };
+
+  try {
+    live =
+      await fetchLive(env);
+  } catch {
+    // Do not fail today's fixtures.
+  }
+
+  const updated =
+    nowISO();
 
   const payload = {
     ok: true,
@@ -680,7 +840,102 @@ async function refreshYesterday(
       ...atp,
       ...wta
     ],
-    updated: nowISO()
+    live:
+      live.matches || [],
+    updated
+  };
+
+  await putCache(
+    env,
+    `today:${date}:atp`,
+    {
+      ok: true,
+      date,
+      tour: "ATP",
+      matches: atp,
+      updated
+    }
+  );
+
+  await putCache(
+    env,
+    `today:${date}:wta`,
+    {
+      ok: true,
+      date,
+      tour: "WTA",
+      matches: wta,
+      updated
+    }
+  );
+
+  await putCache(
+    env,
+    `live:${date}`,
+    live
+  );
+
+  await putCache(
+    env,
+    `today:${date}`,
+    payload
+  );
+
+  return payload;
+}
+
+/* =========================================================
+   REFRESH YESTERDAY
+   ========================================================= */
+
+async function refreshYesterday(
+  env,
+  date
+) {
+  const [
+    atpResult,
+    wtaResult
+  ] =
+    await Promise.allSettled([
+      fetchResults(
+        env,
+        "atp",
+        date
+      ),
+
+      fetchResults(
+        env,
+        "wta",
+        date
+      )
+    ]);
+
+  const atp =
+    atpResult.status ===
+    "fulfilled"
+      ? atpResult.value
+      : [];
+
+  const wta =
+    wtaResult.status ===
+    "fulfilled"
+      ? wtaResult.value
+      : [];
+
+  const updated =
+    nowISO();
+
+  const payload = {
+    ok: true,
+    date,
+    version: VERSION,
+    atp,
+    wta,
+    matches: [
+      ...atp,
+      ...wta
+    ],
+    updated
   };
 
   await putCache(
@@ -691,7 +946,7 @@ async function refreshYesterday(
       date,
       tour: "ATP",
       matches: atp,
-      updated: payload.updated
+      updated
     }
   );
 
@@ -703,7 +958,7 @@ async function refreshYesterday(
       date,
       tour: "WTA",
       matches: wta,
-      updated: payload.updated
+      updated
     }
   );
 
@@ -725,10 +980,11 @@ async function fetchCalendar(
   tour,
   year
 ) {
-  const data = await call(
-    `/tennis/v2/${tour}/tournament/calendar/${year}?pageNo=1&pageSize=200`,
-    env
-  );
+  const data =
+    await call(
+      `/tennis/v2/${tour}/tournament/calendar/${year}?pageNo=1&pageSize=200`,
+      env
+    );
 
   return arr(data);
 }
@@ -737,13 +993,17 @@ async function refreshCalendar(
   env,
   year
 ) {
-  const [atpResult, wtaResult] =
+  const [
+    atpResult,
+    wtaResult
+  ] =
     await Promise.allSettled([
       fetchCalendar(
         env,
         "atp",
         year
       ),
+
       fetchCalendar(
         env,
         "wta",
@@ -752,12 +1012,14 @@ async function refreshCalendar(
     ]);
 
   const atp =
-    atpResult.status === "fulfilled"
+    atpResult.status ===
+    "fulfilled"
       ? atpResult.value
       : [];
 
   const wta =
-    wtaResult.status === "fulfilled"
+    wtaResult.status ===
+    "fulfilled"
       ? wtaResult.value
       : [];
 
@@ -776,7 +1038,6 @@ async function refreshCalendar(
     payload
   );
 
-  // New generic key as well.
   await putCache(
     env,
     "calendar",
@@ -794,24 +1055,32 @@ async function fetchRankings(
   env,
   tour
 ) {
-  const data = await call(
-    `/tennis/v2/${tour}/ranking/singles?pageNo=1&pageSize=50`,
-    env
-  );
+  const data =
+    await call(
+      `/tennis/v2/${tour}/ranking/singles?pageNo=1&pageSize=50`,
+      env
+    );
+
+  const rows =
+    arr(data);
 
   const players =
-    arr(data)
-      .map((p, i) => {
-        const x = player(p);
+    rows.map(
+      (p, i) => {
+        const x =
+          player(p);
 
         return {
           ...x,
 
           rank:
-            x.rank ||
+            Number(
+              x.rank
+            ) ||
             i + 1
         };
-      });
+      }
+    );
 
   return players;
 }
@@ -828,11 +1097,14 @@ async function refreshRankings(
 
   const payload = {
     ok: true,
-    tour: tour.toUpperCase(),
+    tour:
+      tour.toUpperCase(),
     version: VERSION,
     players,
-    count: players.length,
-    updated: nowISO()
+    count:
+      players.length,
+    updated:
+      nowISO()
   };
 
   await putCache(
@@ -845,9 +1117,7 @@ async function refreshRankings(
 }
 
 /* =========================================================
-   CACHE READERS
-   Includes compatibility with previous
-   combined cache keys.
+   READ TODAY
    ========================================================= */
 
 async function readTodayTour(
@@ -855,17 +1125,21 @@ async function readTodayTour(
   date,
   tour
 ) {
-  const key =
-    `today:${date}:${tour}`;
-
   const current =
-    await getCache(env, key);
+    await getCache(
+      env,
+      `today:${date}:${tour}`
+    );
 
   if (current) {
     return current;
   }
 
-  // Compatibility with older Worker.
+  /*
+     Compatibility with the older
+     combined cache.
+  */
+
   const old =
     await getCache(
       env,
@@ -876,11 +1150,14 @@ async function readTodayTour(
     return {
       ok: true,
       date,
-      tour: tour.toUpperCase(),
+      tour:
+        tour.toUpperCase(),
+
       matches:
         tour === "atp"
           ? old.atp || []
           : old.wta || [],
+
       updated:
         old.updated ||
         old.cachedAt ||
@@ -891,22 +1168,25 @@ async function readTodayTour(
   return null;
 }
 
+/* =========================================================
+   READ YESTERDAY
+   ========================================================= */
+
 async function readYesterdayTour(
   env,
   date,
   tour
 ) {
-  const key =
-    `yesterday:${date}:${tour}`;
-
   const current =
-    await getCache(env, key);
+    await getCache(
+      env,
+      `yesterday:${date}:${tour}`
+    );
 
   if (current) {
     return current;
   }
 
-  // Compatibility with older Worker.
   const old =
     await getCache(
       env,
@@ -917,11 +1197,14 @@ async function readYesterdayTour(
     return {
       ok: true,
       date,
-      tour: tour.toUpperCase(),
+      tour:
+        tour.toUpperCase(),
+
       matches:
         tour === "atp"
           ? old.atp || []
           : old.wta || [],
+
       updated:
         old.updated ||
         old.cachedAt ||
@@ -931,6 +1214,10 @@ async function readYesterdayTour(
 
   return null;
 }
+
+/* =========================================================
+   READ CALENDAR
+   ========================================================= */
 
 async function readCalendar(
   env,
@@ -956,9 +1243,11 @@ async function readCalendar(
    HEALTH
    ========================================================= */
 
-async function health(env) {
+async function health(
+  env
+) {
   const today =
-    dateUTC(0);
+    dateUTC();
 
   const yesterday =
     dateUTC(-1);
@@ -983,6 +1272,20 @@ async function health(env) {
       `live:${today}`
     );
 
+  const yATP =
+    await readYesterdayTour(
+      env,
+      yesterday,
+      "atp"
+    );
+
+  const yWTA =
+    await readYesterdayTour(
+      env,
+      yesterday,
+      "wta"
+    );
+
   const calendar =
     await readCalendar(
       env,
@@ -1001,24 +1304,14 @@ async function health(env) {
       "rankings:wta"
     );
 
-  const yesterdayATP =
-    await readYesterdayTour(
-      env,
-      yesterday,
-      "atp"
-    );
-
-  const yesterdayWTA =
-    await readYesterdayTour(
-      env,
-      yesterday,
-      "wta"
-    );
-
   return {
     ok: true,
-    version: VERSION,
-    date: today,
+
+    version:
+      VERSION,
+
+    date:
+      today,
 
     cacheConfigured:
       !!env.TENNIS_CACHE,
@@ -1027,22 +1320,33 @@ async function health(env) {
       !!env.TENNIS_API_KEY,
 
     today: {
-      atp: !!atp,
-      wta: !!wta,
-      live: !!live
+      atp:
+        !!atp,
+
+      wta:
+        !!wta,
+
+      live:
+        !!live
     },
 
     yesterday: {
-      atp: !!yesterdayATP,
-      wta: !!yesterdayWTA
+      atp:
+        !!yATP,
+
+      wta:
+        !!yWTA
     },
 
     calendar:
       !!calendar,
 
     rankings: {
-      atp: !!rankingsATP,
-      wta: !!rankingsWTA
+      atp:
+        !!rankingsATP,
+
+      wta:
+        !!rankingsWTA
     },
 
     cached:
@@ -1050,6 +1354,8 @@ async function health(env) {
         atp ||
         wta ||
         live ||
+        yATP ||
+        yWTA ||
         calendar ||
         rankingsATP ||
         rankingsWTA
@@ -1058,6 +1364,8 @@ async function health(env) {
     updated:
       atp?.updated ||
       wta?.updated ||
+      yATP?.updated ||
+      yWTA?.updated ||
       live?.updated ||
       null
   };
@@ -1067,9 +1375,11 @@ async function health(env) {
    DEBUG
    ========================================================= */
 
-async function debug(env) {
+async function debug(
+  env
+) {
   const today =
-    dateUTC(0);
+    dateUTC();
 
   const yesterday =
     dateUTC(-1);
@@ -1110,52 +1420,82 @@ async function debug(env) {
 
   return {
     ok: true,
-    version: VERSION,
-    date: today,
+
+    version:
+      VERSION,
+
+    date:
+      today,
 
     today: {
       atp: {
-        cached: !!atp,
+        cached:
+          !!atp,
+
         count:
-          atp?.matches?.length || 0,
+          atp?.matches?.length ||
+          0,
+
         updated:
-          atp?.updated || null
+          atp?.updated ||
+          null
       },
 
       wta: {
-        cached: !!wta,
+        cached:
+          !!wta,
+
         count:
-          wta?.matches?.length || 0,
+          wta?.matches?.length ||
+          0,
+
         updated:
-          wta?.updated || null
+          wta?.updated ||
+          null
       },
 
       live: {
-        cached: !!live,
+        cached:
+          !!live,
+
         count:
-          live?.matches?.length || 0,
+          live?.matches?.length ||
+          0,
+
         updated:
-          live?.updated || null
+          live?.updated ||
+          null
       }
     },
 
     yesterday: {
-      date: yesterday,
+      date:
+        yesterday,
 
       atp: {
-        cached: !!yATP,
+        cached:
+          !!yATP,
+
         count:
-          yATP?.matches?.length || 0,
+          yATP?.matches?.length ||
+          0,
+
         updated:
-          yATP?.updated || null
+          yATP?.updated ||
+          null
       },
 
       wta: {
-        cached: !!yWTA,
+        cached:
+          !!yWTA,
+
         count:
-          yWTA?.matches?.length || 0,
+          yWTA?.matches?.length ||
+          0,
+
         updated:
-          yWTA?.updated || null
+          yWTA?.updated ||
+          null
       }
     }
   };
@@ -1165,7 +1505,9 @@ async function debug(env) {
    RANKINGS DEBUG
    ========================================================= */
 
-async function rankingsDebug(env) {
+async function rankingsDebug(
+  env
+) {
   const atp =
     await getCache(
       env,
@@ -1180,22 +1522,34 @@ async function rankingsDebug(env) {
 
   return {
     ok: true,
-    version: VERSION,
+
+    version:
+      VERSION,
 
     atp: {
-      cached: !!atp,
+      cached:
+        !!atp,
+
       count:
-        atp?.players?.length || 0,
+        atp?.players?.length ||
+        0,
+
       cachedAt:
-        atp?.updated || null
+        atp?.updated ||
+        null
     },
 
     wta: {
-      cached: !!wta,
+      cached:
+        !!wta,
+
       count:
-        wta?.players?.length || 0,
+        wta?.players?.length ||
+        0,
+
       cachedAt:
-        wta?.updated || null
+        wta?.updated ||
+        null
     }
   };
 }
@@ -1204,12 +1558,18 @@ async function rankingsDebug(env) {
    SCHEDULED DEBUG
    ========================================================= */
 
-async function scheduledDebug(env) {
+async function scheduledDebug(
+  env
+) {
   return {
     ok: true,
-    version: VERSION,
+
+    version:
+      VERSION,
+
     message:
-      "Scheduled refreshes use RapidAPI only. Visitor requests use KV cache only.",
+      "Scheduled refreshes use RapidAPI. Visitor requests use KV only.",
+
     schedule: [
       "00:00 UTC",
       "04:00 UTC",
@@ -1218,9 +1578,11 @@ async function scheduledDebug(env) {
       "16:00 UTC",
       "20:00 UTC"
     ],
+
     special: {
       "00:00 UTC":
         "Calendar + ATP/WTA rankings",
+
       "08:00 UTC":
         "Yesterday ATP/WTA results"
     }
@@ -1228,14 +1590,14 @@ async function scheduledDebug(env) {
 }
 
 /* =========================================================
-   VISITOR: TODAY
+   TODAY ENDPOINT
    ========================================================= */
 
 async function todayEndpoint(
   env
 ) {
   const date =
-    dateUTC(0);
+    dateUTC();
 
   const atp =
     await readTodayTour(
@@ -1268,18 +1630,25 @@ async function todayEndpoint(
 
   return {
     ok: true,
-    date,
-    version: VERSION,
 
-    atp: ATP,
-    wta: WTA,
+    date,
+
+    version:
+      VERSION,
+
+    atp:
+      ATP,
+
+    wta:
+      WTA,
 
     matches: [
       ...ATP,
       ...WTA
     ],
 
-    live: LIVE,
+    live:
+      LIVE,
 
     count:
       ATP.length +
@@ -1294,7 +1663,8 @@ async function todayEndpoint(
     liveCount:
       LIVE.length,
 
-    cached: true,
+    cached:
+      true,
 
     updated:
       atp?.updated ||
@@ -1305,7 +1675,7 @@ async function todayEndpoint(
 }
 
 /* =========================================================
-   VISITOR: YESTERDAY
+   YESTERDAY ENDPOINT
    ========================================================= */
 
 async function yesterdayEndpoint(
@@ -1336,11 +1706,17 @@ async function yesterdayEndpoint(
 
   return {
     ok: true,
-    date,
-    version: VERSION,
 
-    atp: ATP,
-    wta: WTA,
+    date,
+
+    version:
+      VERSION,
+
+    atp:
+      ATP,
+
+    wta:
+      WTA,
 
     matches: [
       ...ATP,
@@ -1357,7 +1733,8 @@ async function yesterdayEndpoint(
     wtaCount:
       WTA.length,
 
-    cached: true,
+    cached:
+      true,
 
     updated:
       atp?.updated ||
@@ -1367,7 +1744,7 @@ async function yesterdayEndpoint(
 }
 
 /* =========================================================
-   VISITOR: CALENDAR
+   CALENDAR ENDPOINT
    ========================================================= */
 
 async function calendarEndpoint(
@@ -1382,23 +1759,32 @@ async function calendarEndpoint(
   if (!data) {
     return {
       ok: true,
-      version: VERSION,
-      year: yearUTC(),
+      version:
+        VERSION,
+
+      year:
+        yearUTC(),
+
       atp: [],
       wta: [],
-      cached: true,
-      updated: null
+
+      cached:
+        true,
+
+      updated:
+        null
     };
   }
 
   return {
     ...data,
-    cached: true
+    cached:
+      true
   };
 }
 
 /* =========================================================
-   VISITOR: RANKINGS
+   RANKINGS ENDPOINT
    ========================================================= */
 
 async function rankingsEndpoint(
@@ -1406,21 +1792,21 @@ async function rankingsEndpoint(
   tour
 ) {
   const t =
-    String(tour || "atp")
-      .toLowerCase();
+    String(
+      tour || "atp"
+    ).toLowerCase();
 
   if (
     t !== "atp" &&
     t !== "wta"
   ) {
-    return json(
-      {
-        error:
-          "Tour must be atp or wta",
-        version: VERSION
-      },
-      400
-    );
+    return {
+      error:
+        "Tour must be atp or wta",
+
+      version:
+        VERSION
+    };
   }
 
   const data =
@@ -1432,18 +1818,31 @@ async function rankingsEndpoint(
   if (!data) {
     return {
       ok: true,
-      tour: t.toUpperCase(),
-      version: VERSION,
+
+      tour:
+        t.toUpperCase(),
+
+      version:
+        VERSION,
+
       players: [],
-      count: 0,
-      cached: true,
-      updated: null
+
+      count:
+        0,
+
+      cached:
+        true,
+
+      updated:
+        null
     };
   }
 
   return {
     ...data,
-    cached: true
+
+    cached:
+      true
   };
 }
 
@@ -1468,20 +1867,33 @@ async function scheduledRefresh(
     d.toISOString()
       .slice(0, 10);
 
-  const results = {
-    version: VERSION,
-    scheduledAt: d.toISOString(),
+  const result = {
+    version:
+      VERSION,
+
+    scheduledAt:
+      d.toISOString(),
+
     hour,
-    today: false,
-    yesterday: false,
-    calendar: false,
-    rankings: false,
+
+    today:
+      false,
+
+    yesterday:
+      false,
+
+    calendar:
+      false,
+
+    rankings:
+      false,
+
     errors: []
   };
 
   /* -----------------------------------------
-     EVERY RUN:
-     TODAY ATP + WTA + LIVE
+     EVERY RUN
+     TODAY
      ----------------------------------------- */
 
   try {
@@ -1490,17 +1902,18 @@ async function scheduledRefresh(
       today
     );
 
-    results.today = true;
+    result.today =
+      true;
   } catch (e) {
-    results.errors.push(
+    result.errors.push(
       "today: " +
       e.message
     );
   }
 
   /* -----------------------------------------
-     08:00 UTC:
-     YESTERDAY RESULTS
+     08:00 UTC
+     YESTERDAY
      ----------------------------------------- */
 
   if (hour === 8) {
@@ -1510,9 +1923,10 @@ async function scheduledRefresh(
         dateUTC(-1)
       );
 
-      results.yesterday = true;
+      result.yesterday =
+        true;
     } catch (e) {
-      results.errors.push(
+      result.errors.push(
         "yesterday: " +
         e.message
       );
@@ -1520,7 +1934,7 @@ async function scheduledRefresh(
   }
 
   /* -----------------------------------------
-     00:00 UTC:
+     00:00 UTC
      CALENDAR + RANKINGS
      ----------------------------------------- */
 
@@ -1531,9 +1945,10 @@ async function scheduledRefresh(
         yearUTC()
       );
 
-      results.calendar = true;
+      result.calendar =
+        true;
     } catch (e) {
-      results.errors.push(
+      result.errors.push(
         "calendar: " +
         e.message
       );
@@ -1550,20 +1965,21 @@ async function scheduledRefresh(
         "wta"
       );
 
-      results.rankings = true;
+      result.rankings =
+        true;
     } catch (e) {
-      results.errors.push(
+      result.errors.push(
         "rankings: " +
         e.message
       );
     }
   }
 
-  return results;
+  return result;
 }
 
 /* =========================================================
-   REQUEST ROUTER
+   ROUTER
    ========================================================= */
 
 async function handle(
@@ -1571,26 +1987,28 @@ async function handle(
   env
 ) {
   const url =
-    new URL(request.url);
+    new URL(
+      request.url
+    );
 
   const path =
     url.pathname;
 
-  /* -----------------------------------------
-     HEALTH
-     ----------------------------------------- */
+  /* HEALTH */
 
-  if (path === "/api/health") {
+  if (
+    path === "/api/health"
+  ) {
     return json(
       await health(env)
     );
   }
 
-  /* -----------------------------------------
-     DEBUG
-     ----------------------------------------- */
+  /* DEBUG */
 
-  if (path === "/api/debug") {
+  if (
+    path === "/api/debug"
+  ) {
     return json(
       await debug(env)
     );
@@ -1614,9 +2032,7 @@ async function handle(
     );
   }
 
-  /* -----------------------------------------
-     TODAY
-     ----------------------------------------- */
+  /* TODAY */
 
   if (
     path === "/api/today" ||
@@ -1627,9 +2043,7 @@ async function handle(
     );
   }
 
-  /* -----------------------------------------
-     YESTERDAY
-     ----------------------------------------- */
+  /* YESTERDAY */
 
   if (
     path === "/api/yesterday"
@@ -1639,9 +2053,7 @@ async function handle(
     );
   }
 
-  /* -----------------------------------------
-     CALENDAR
-     ----------------------------------------- */
+  /* CALENDAR */
 
   if (
     path === "/api/calendar"
@@ -1651,12 +2063,11 @@ async function handle(
     );
   }
 
-  /* -----------------------------------------
-     RANKINGS
-     ----------------------------------------- */
+  /* ATP RANKINGS */
 
   if (
-    path === "/api/rankings/atp"
+    path ===
+    "/api/rankings/atp"
   ) {
     return json(
       await rankingsEndpoint(
@@ -1666,8 +2077,11 @@ async function handle(
     );
   }
 
+  /* WTA RANKINGS */
+
   if (
-    path === "/api/rankings/wta"
+    path ===
+    "/api/rankings/wta"
   ) {
     return json(
       await rankingsEndpoint(
@@ -1677,8 +2091,11 @@ async function handle(
     );
   }
 
+  /* GENERIC RANKINGS */
+
   if (
-    path === "/api/rankings"
+    path ===
+    "/api/rankings"
   ) {
     const tour =
       url.searchParams.get(
@@ -1693,9 +2110,7 @@ async function handle(
     );
   }
 
-  /* -----------------------------------------
-     STATIC WEBSITE
-     ----------------------------------------- */
+  /* STATIC WEBSITE */
 
   if (env.ASSETS) {
     return env.ASSETS.fetch(
@@ -1716,7 +2131,7 @@ async function handle(
 }
 
 /* =========================================================
-   WORKER EXPORT
+   EXPORT
    ========================================================= */
 
 export default {
@@ -1734,7 +2149,10 @@ export default {
       return json(
         {
           ok: false,
-          version: VERSION,
+
+          version:
+            VERSION,
+
           error:
             e?.message ||
             String(e)
