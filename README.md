@@ -156,3 +156,10 @@ Your RapidAPI plan does NOT have the "results by date" route (it answers
 - Expected usage: about 12 (fixtures) + 12-20 (sweeps) + 3-4 (calendar/rankings)
   = roughly 30-36 requests a day, under the free plan's 50.
 - Also in this version: iPhone menu fix, clear error messages when scores can't load.
+
+## v9
+- Footer: new row with **About us** (`/about.html`), **Terms and conditions**
+  (`/terms.html`) and **contact@yeptennis.com** (opens the visitor's email app).
+- The two new pages use the site's header, colours and fonts and work on phones.
+- The terms are a general template: have them checked if YepTennis becomes a
+  business (company name, address and publisher details may be required in France).
