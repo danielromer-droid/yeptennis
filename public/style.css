@@ -114,6 +114,10 @@ button { font: inherit; }
 
 .menu {
   display: none;
+  min-width: 44px;
+  min-height: 44px;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
   border: 0;
   background: transparent;
   color: white;

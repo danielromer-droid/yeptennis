@@ -59,18 +59,23 @@ document.addEventListener("DOMContentLoaded", () => {
 function setupNavigation() {
 
   const menu = document.querySelector(".menu");
-  const nav = document.querySelector("nav");
+  const nav = document.querySelector(".mobile-nav");
 
   if (!menu || !nav) return;
 
+  const setOpen = open => {
+    nav.classList.toggle("open", open);
+    menu.setAttribute("aria-expanded", open ? "true" : "false");
+    menu.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+    menu.textContent = open ? "✕" : "☰";
+  };
+
   menu.addEventListener("click", () => {
-    nav.classList.toggle("open");
+    setOpen(!nav.classList.contains("open"));
   });
 
   nav.querySelectorAll("a").forEach(link => {
-    link.addEventListener("click", () => {
-      nav.classList.remove("open");
-    });
+    link.addEventListener("click", () => setOpen(false));
   });
 
 }
@@ -370,6 +375,17 @@ async function loadResultsForDate(date, { silent = false } = {}) {
 
 }
 
+function explainResultsError(errors) {
+  const text = errors.join(" ");
+  if (/QUOTA|429|quota|exceeded/i.test(text)) {
+    return "Scores can't load right now: the tennis data provider's daily limit has been reached. They will appear automatically after the limit resets.";
+  }
+  if (/KEY|401|403|subscribed|not configured/i.test(text)) {
+    return "Scores can't load: the tennis data key isn't accepted. Check the TENNIS_API_KEY secret in Cloudflare.";
+  }
+  return "Scores can't load right now from the tennis data provider. The site retries automatically.";
+}
+
 function showResultsError() {
   const list = document.getElementById("results-list");
   if (list) list.innerHTML = `<div class="api-message">Results temporarily unavailable.</div>`;
@@ -470,12 +486,19 @@ function renderResults() {
     message.className =
       "api-message";
 
+    const errors =
+      Array.isArray(activeData.errors) ? activeData.errors : [];
+
+    const failedAll = !matches.length && errors.length;
+
     message.textContent =
-      resultsFilter === "wta"
-        ? "No WTA matches for this day/filter."
-        : resultsFilter === "atp"
-          ? "No ATP matches for this day/filter."
-          : "No matches for this day/filter.";
+      failedAll
+        ? explainResultsError(errors)
+        : resultsFilter === "wta"
+          ? "No WTA matches for this day/filter."
+          : resultsFilter === "atp"
+            ? "No ATP matches for this day/filter."
+            : "No matches for this day/filter.";
 
     list.appendChild(message);
 

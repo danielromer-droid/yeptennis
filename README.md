@@ -137,3 +137,17 @@ The site used the API's **fixtures** endpoint for every day. Fixtures is the
 - Testing the API: use your tennis domain, e.g.
   `https://yeptennis.com/api/results?date=2026-09-27`
   (or the `*.workers.dev` address shown in Cloudflare), not yepfootball.com.
+
+
+## v7 changes
+- **iPhone menu fixed**: the ☰ button was opening the hidden desktop menu instead
+  of the mobile one. It now opens the mobile menu, turns into ✕ to close it, and
+  closes itself when you tap a link.
+- **Clear message when scores can't load**: instead of "No matches", the Results
+  section now says why (daily RapidAPI limit reached, key rejected, or provider down).
+- **New check page**: `/api/check` makes ONE live call and shows whether the key works,
+  how many RapidAPI requests are left today, a sample match, and which of the last
+  4 days are cached. Use it only when something looks wrong (it costs 1 request).
+- Saves requests: if the results endpoint rejects the `include` option, the worker
+  remembers it for a week instead of paying an extra request every time.
+- Cache keys renamed to `res3:*` so earlier empty snapshots are ignored.

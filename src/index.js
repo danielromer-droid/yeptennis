@@ -1,4 +1,4 @@
-const VERSION = "YepTennis Worker 2026-09-28.2";
+const VERSION = "YepTennis Worker 2026-09-28.3";
 
 const HOST = "tennis-api-atp-wta-itf.p.rapidapi.com";
 const BASE = `https://${HOST}`;
@@ -118,6 +118,8 @@ async function refreshCache(env, key, ttlSeconds, fetcher) {
   return payload;
 }
 
+let lastQuota = null;
+
 async function call(path, env) {
   if (!env.TENNIS_API_KEY) {
     throw Error("TENNIS_API_KEY is not configured in Cloudflare.");
@@ -132,6 +134,14 @@ async function call(path, env) {
 
   const t = await r.text();
 
+  lastQuota = {
+    limit: r.headers.get("x-ratelimit-requests-limit"),
+    remaining: r.headers.get("x-ratelimit-requests-remaining"),
+    reset: r.headers.get("x-ratelimit-requests-reset"),
+    status: r.status,
+    at: new Date().toISOString()
+  };
+
   let d;
 
   try {
@@ -141,10 +151,16 @@ async function call(path, env) {
   }
 
   if (!r.ok) {
-    const err = Error(
+    const base =
       d.message ||
       d.error ||
-      `Tennis API HTTP ${r.status}`
+      `Tennis API HTTP ${r.status}`;
+    const err = Error(
+      r.status === 429
+        ? `QUOTA: daily RapidAPI limit reached (${base})`
+        : r.status === 401 || r.status === 403
+          ? `KEY: RapidAPI key rejected or not subscribed (${base})`
+          : base
     );
     err.status = r.status;
     throw err;
@@ -525,11 +541,21 @@ const listPath = (tour, kind, d) =>
    tournament name and round. If the API rejects the parameter, retry
    plain - the rows still carry scores. */
 async function callResults(tour, d, env) {
+  const kv = env.TENNIS_CACHE;
+  const flagKey = "flag:results-no-include";
+  const skipInclude = kv ? await kv.get(flagKey).catch(() => null) : null;
+
+  if (skipInclude) {
+    return call(listPath(tour, "results", d), env);
+  }
+
   try {
     return await call(listPath(tour, "results", d) + "&include=round,tournament", env);
   }
   catch (e) {
     if (e.status === 400 || e.status === 422) {
+      // remember for a week so we don't waste a request every time
+      if (kv) await kv.put(flagKey, "1", { expirationTtl: 7 * 24 * 60 * 60 }).catch(() => {});
       return call(listPath(tour, "results", d), env);
     }
     throw e;
@@ -657,7 +683,7 @@ async function resultsForDate(env, date) {
 
   return cached(
     env,
-    `res2:${date}`,
+    `res3:${date}`,
     ttl,
     () => fetchToday(env, date)
   );
@@ -670,7 +696,7 @@ async function resultsForDate(env, date) {
 
 async function debug(env) {
   const d = new Date().toISOString().slice(0, 10);
-  const key = `res2:${d}`;
+  const key = `res3:${d}`;
   let cachedToday = null;
   let error = null;
 
@@ -1281,7 +1307,7 @@ export default {
       // 2) Today: finished results + scheduled/in-progress fixtures,
       //    refreshed on every run (6x/day).
       await step(() =>
-        refreshCache(env, `res2:${d}`, TODAY_TTL, () => fetchToday(env, d))
+        refreshCache(env, `res3:${d}`, TODAY_TTL, () => fetchToday(env, d))
       );
 
       // 3) The previous days (RECENT_DAYS = today + last 3), results only.
@@ -1289,7 +1315,7 @@ export default {
       //    finishes; older days are only backfilled when missing/empty.
       for (let offset = 1; offset < RECENT_DAYS; offset++) {
         const dd = dateOffset(now, -offset);
-        const key = `res2:${dd}`;
+        const key = `res3:${dd}`;
 
         const force = offset === 1 && (hour === 0 || hour === 8);
 
@@ -1361,6 +1387,51 @@ export default {
           await debug(env)
         );
 
+      }
+
+
+      /* CHECK: one live RapidAPI call, no cache. Shows whether the key
+         works, how many requests are left today, and a sample row.
+         Costs 1 request - open it only when something looks wrong. */
+
+      if (u.pathname === "/api/check") {
+        const dd = dateOffset(new Date(), -1);
+        const path = listPath("atp", "results", dd).replace("pageSize=500", "pageSize=3");
+        const out = {
+          version: VERSION,
+          apiConfigured: Boolean(env.TENNIS_API_KEY),
+          cacheConfigured: Boolean(env.TENNIS_CACHE),
+          request: path
+        };
+        try {
+          const d = await call(path, env);
+          const rows = arr(d);
+          out.ok = true;
+          out.topLevelKeys = d && typeof d === "object" ? Object.keys(d) : [];
+          out.rowCount = rows.length;
+          out.sampleRow = rows[0] || null;
+          out.parsedSample = rows[0] ? match(rows[0], "atp", "result") : null;
+        } catch (e) {
+          out.ok = false;
+          out.error = e.message || String(e);
+        }
+        out.quota = lastQuota;
+        const cachedKeys = [];
+        if (env.TENNIS_CACHE) {
+          for (let i = 0; i < RECENT_DAYS; i++) {
+            const k = `res3:${dateOffset(new Date(), -i)}`;
+            const v = await env.TENNIS_CACHE.get(k, "json").catch(() => null);
+            cachedKeys.push({
+              date: k.slice(5),
+              cached: Boolean(v),
+              matches: v?.count || 0,
+              errors: v?.errors || [],
+              cachedAt: v?.cachedAt || null
+            });
+          }
+        }
+        out.recentDays = cachedKeys;
+        return J(out);
       }
 
 
