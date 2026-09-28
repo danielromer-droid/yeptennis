@@ -585,6 +585,9 @@ function renderResults() {
       if (match.live) {
         status = "LIVE";
       }
+      else if (match.status === "Final score pending") {
+        status = "Played · final score soon";
+      }
       else if (!match.completed && match.start) {
         const t = new Date(match.start);
         if (!Number.isNaN(t.getTime())) {

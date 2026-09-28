@@ -1,4 +1,4 @@
-const VERSION = "YepTennis Worker 2026-09-28.3";
+const VERSION = "YepTennis Worker 2026-09-28.5";
 
 const HOST = "tennis-api-atp-wta-itf.p.rapidapi.com";
 const BASE = `https://${HOST}`;
@@ -405,7 +405,7 @@ function match(x, tour, kind = "fixture", levels = null) {
     seed2: x.seed2 || "",
 
     // 1 = player1 won (results rows only)
-    winner: finished ? 1 : 0,
+    winner: kind === "result" ? 1 : 0,
 
     score: finished ? resultText : (liveText || ""),
 
@@ -418,6 +418,8 @@ function match(x, tour, kind = "fixture", levels = null) {
     tournament,
 
     tournamentId,
+
+    rankId: t.rankId || t.rank?.id || x.rankId || null,
 
     level,
 
@@ -516,7 +518,7 @@ function masters(x, tour) {
 
 async function levelLookup(env) {
   const y = new Date().getUTCFullYear();
-  const cal = await readGood(env, `calendar2:${y}`);
+  const cal = await readGood(env, `calendar3:${y}`);
   const out = { ...(cal?.levelIds || {}) };
 
   for (const t of cal?.tournaments || []) {
@@ -537,98 +539,231 @@ const CATEGORY_ORDER = {
 const listPath = (tour, kind, d) =>
   `/tennis/v2/${tour}/${kind}/${d}?pageNo=1&pageSize=500&filter=PlayerGroup:singles`;
 
-/* Results rows are asked with include=round,tournament so we get the
-   tournament name and round. If the API rejects the parameter, retry
-   plain - the rows still carry scores. */
-async function callResults(tour, d, env) {
-  const kv = env.TENNIS_CACHE;
-  const flagKey = "flag:results-no-include";
-  const skipInclude = kv ? await kv.get(flagKey).catch(() => null) : null;
+/* =====================================================
+   RESULTS ENGINE
 
-  if (skipInclude) {
-    return call(listPath(tour, "results", d), env);
-  }
+   On this RapidAPI plan the "results by date" route does not
+   exist (it returns "Endpoint does not exist"). What does exist:
+   - FIXTURES by date: today's schedule, live scores, and the
+     score of matches already played today.
+   - TOURNAMENT RESULTS by season id: every completed match of
+     one tournament, each with its date, score and winner.
 
+   So finished scores come from the tournaments that are running
+   now or ended in the last few days (ATP/WTA 250 and up), one
+   request per tournament, and are split into days by match date.
+   One sweep fills every recent day at once.
+   ===================================================== */
+
+const SEEN_KEY = "seen:tournaments";
+const SWEEP_KEY = "sweep:last";
+const SWEEP_HOURS = [0, 8, 12, 20];      // UTC cron runs that sweep
+const MAX_SWEEP = 8;                     // request cap per sweep
+const TRES_TTL = 12 * 24 * 60 * 60;      // stored tournament results
+
+const kvGet = async (env, key) => {
+  if (!env.TENNIS_CACHE) return null;
+  try { return await env.TENNIS_CACHE.get(key, "json"); } catch { return null; }
+};
+
+const kvPut = async (env, key, value, ttl) => {
+  if (!env.TENNIS_CACHE) return;
   try {
-    return await call(listPath(tour, "results", d) + "&include=round,tournament", env);
+    await env.TENNIS_CACHE.put(key, JSON.stringify(value), ttl ? { expirationTtl: ttl } : undefined);
+  } catch { /* not fatal */ }
+};
+
+const isMainTour = (m, levels) =>
+  Boolean(
+    (m.tournamentId && levels[m.tournamentId]) ||
+    Number(m.rankId) >= 2 ||
+    ["Grand Slam", "Finals", "1000", "500", "250"].includes(m.category)
+  );
+
+const pairKey = m =>
+  `${m.tour}:${m.tournamentId || m.tournament}:${[m.player1Id || m.player1, m.player2Id || m.player2].sort().join("-")}`;
+
+const dayOf = m => String(m.start || "").slice(0, 10);
+
+/* Remember which main-tour tournaments we have seen in fixtures,
+   so the sweep still finds an event for a few days after it ends. */
+async function rememberTournaments(env, matches, levels, d) {
+  const seen = (await kvGet(env, SEEN_KEY)) || {};
+  for (const m of matches) {
+    if (!m.tournamentId || !isMainTour(m, levels)) continue;
+    seen[`${m.tour}:${m.tournamentId}`] = {
+      tour: m.tour,
+      id: m.tournamentId,
+      name: m.tournament,
+      category: m.category,
+      lastSeen: d
+    };
   }
-  catch (e) {
-    if (e.status === 400 || e.status === 422) {
-      // remember for a week so we don't waste a request every time
-      if (kv) await kv.put(flagKey, "1", { expirationTtl: 7 * 24 * 60 * 60 }).catch(() => {});
-      return call(listPath(tour, "results", d), env);
-    }
-    throw e;
+  const cutoff = dateOffset(new Date(), -6);
+  for (const [k, t] of Object.entries(seen)) {
+    if (t.lastSeen < cutoff) delete seen[k];
   }
+  await kvPut(env, SEEN_KEY, seen);
+  return seen;
 }
 
-/* One day of matches.
-   - Past days: the RESULTS endpoint (finished matches, real scores).
-   - Today: RESULTS (finished so far) + FIXTURES (scheduled and in
-     progress; `live` holds the running score), de-duplicated.
-   Fixtures alone never held final scores - that is why old days looked
-   empty. */
-
-async function fetchToday(env, d) {
-
-  const isToday =
-    d === new Date().toISOString().slice(0, 10);
-
-  const jobs = [
-    callResults("atp", d, env),
-    callResults("wta", d, env)
-  ];
-
-  if (isToday) {
-    jobs.push(
-      call(listPath("atp", "fixtures", d) + "&include=round,tournament", env),
-      call(listPath("wta", "fixtures", d) + "&include=round,tournament", env)
-    );
-  }
-
-  const [ra, rw, fa, fw] = await Promise.allSettled(jobs);
+/* Today's fixtures (2 requests). Stored separately from the final
+   day view so the sweep can merge into it. */
+async function fetchFixtures(env, d) {
+  const [fa, fw] = await Promise.allSettled([
+    call(listPath("atp", "fixtures", d) + "&include=round,tournament", env),
+    call(listPath("wta", "fixtures", d) + "&include=round,tournament", env)
+  ]);
 
   const levels = await levelLookup(env);
+  const matches = [];
+  if (fa.status === "fulfilled") matches.push(...arr(fa.value).map(x => match(x, "atp", "fixture", levels)));
+  if (fw.status === "fulfilled") matches.push(...arr(fw.value).map(x => match(x, "wta", "fixture", levels)));
 
-  const rows = [];
-  const seen = new Set();
+  const errors = [fa, fw]
+    .filter(r => r.status === "rejected")
+    .map(r => String(r.reason?.message || r.reason));
 
-  const add = (settled, tour, kind) => {
-    if (!settled || settled.status !== "fulfilled") return;
-
-    for (const x of arr(settled.value)) {
-      const m = match(x, tour, kind, levels);
-
-      // results win over fixtures if a match shows up in both
-      const key = m.id ? `${tour}:${m.id}` : null;
-      if (key && seen.has(key)) continue;
-      if (key) seen.add(key);
-
-      rows.push(m);
+  if (matches.length) {
+    // Matches drop off the fixtures list once they are played. Keep them
+    // until the next sweep brings their final score, so today's played
+    // matches don't vanish from the page in between.
+    const prev = await kvGet(env, `fix:${d}`);
+    const now = new Set(matches.map(pairKey));
+    for (const old of prev?.matches || []) {
+      if (now.has(pairKey(old)) || old.completed) continue;
+      const started =
+        old.live ||
+        old.status === "Final score pending" ||
+        (old.start && Date.parse(old.start) < Date.now());
+      if (!started) continue;   // still in the future: it was removed, not played
+      matches.push({ ...old, live: false, score: "", status: "Final score pending" });
     }
-  };
+    await kvPut(env, `fix:${d}`, { date: d, matches, at: new Date().toISOString() }, 3 * 24 * 60 * 60);
+    await rememberTournaments(env, matches, levels, d);
+  }
 
-  add(ra, "atp", "result");
-  add(rw, "wta", "result");
-  add(fa, "atp", "fixture");
-  add(fw, "wta", "fixture");
+  return { matches, errors };
+}
 
-  const rankOf = m =>
-    m.category in CATEGORY_ORDER ? CATEGORY_ORDER[m.category] : 5;
+/* Which tournaments to sweep: running now (seen in fixtures) plus
+   events from the calendar that are running or ended in the last
+   4 days. Finished events already stored after they ended are
+   skipped - their results can't change any more. */
+async function sweepTargets(env) {
+  const y = new Date().getUTCFullYear();
+  const cal = await readGood(env, `calendar3:${y}`);
+  const seen = (await kvGet(env, SEEN_KEY)) || {};
+  const todayIso = new Date().toISOString().slice(0, 10);
 
-  const matches =
-    rows.sort(
-      (p, q) =>
-        rankOf(p) - rankOf(q) ||
-        String(p.tournament).localeCompare(String(q.tournament)) ||
-        Number(q.live) - Number(p.live) ||
-        String(p.start).localeCompare(String(q.start))
-    );
+  const targets = new Map();
+  for (const t of Object.values(seen)) targets.set(`${t.tour}:${t.id}`, { ...t, active: t.lastSeen === todayIso });
+  for (const t of cal?.recent || []) {
+    const k = `${t.tour}:${t.id}`;
+    if (!targets.has(k)) targets.set(k, { ...t, active: false });
+  }
 
-  const errors =
-    [ra, rw, fa, fw]
-      .filter(r => r && r.status === "rejected")
-      .map(r => String(r.reason?.message || r.reason));
+  const out = [];
+  for (const [k, t] of targets) {
+    if (!t.active) {
+      const stored = await kvGet(env, `tres:${k}`);
+      // stored after the event was last on the schedule -> complete
+      if (stored && t.lastSeen && stored.at.slice(0, 10) > t.lastSeen) continue;
+      if (stored && !t.lastSeen && Date.now() - Date.parse(stored.at) < 20 * 3600000) continue;
+    }
+    out.push(t);
+  }
+
+  // running events first, then by level
+  const rank = t => (t.active ? 0 : 10) + (CATEGORY_ORDER[t.category] ?? 5);
+  return out.sort((a, b) => rank(a) - rank(b)).slice(0, MAX_SWEEP);
+}
+
+/* Fetch completed matches for each target tournament (1 request each). */
+async function sweepResults(env) {
+  const targets = await sweepTargets(env);
+  const levels = await levelLookup(env);
+  const errors = [];
+  let fetched = 0;
+
+  for (const t of targets) {
+    try {
+      const d = await call(`/tennis/v2/${t.tour}/tournament/results/${t.id}`, env);
+      const raw = Array.isArray(d?.data?.singles) ? d.data.singles
+        : Array.isArray(d?.singles) ? d.singles
+        : arr(d);
+      const rows = raw
+        .filter(x => x && (x.result || x.player1))
+        .map(x => {
+          const m = match(x, t.tour, "result", levels);
+          if (!m.tournament) m.tournament = t.name || "";
+          if (!m.tournamentId) m.tournamentId = t.id;
+          if (!m.category) m.category = t.category || levels[t.id] || "";
+          return m;
+        })
+        .filter(m => m.score && dayOf(m));
+      await kvPut(env, `tres:${t.tour}:${t.id}`, { at: new Date().toISOString(), name: t.name, rows }, TRES_TTL);
+      fetched++;
+    } catch (e) {
+      errors.push(`${t.name || t.id}: ${e.message || e}`);
+      if (/QUOTA/.test(String(e.message))) break;   // stop wasting calls
+    }
+  }
+
+  await kvPut(env, SWEEP_KEY, { at: new Date().toISOString(), targets: targets.length, fetched, errors }, 7 * 24 * 60 * 60);
+  return { targets: targets.length, fetched, errors };
+}
+
+/* All stored completed matches, from every tournament we know of. */
+async function storedResults(env) {
+  const y = new Date().getUTCFullYear();
+  const cal = await readGood(env, `calendar3:${y}`);
+  const seen = (await kvGet(env, SEEN_KEY)) || {};
+  const keys = new Set([
+    ...Object.keys(seen),
+    ...(cal?.recent || []).map(t => `${t.tour}:${t.id}`)
+  ]);
+  const rows = [];
+  for (const k of keys) {
+    const v = await kvGet(env, `tres:${k}`);
+    if (v?.rows) rows.push(...v.rows);
+  }
+  return rows;
+}
+
+/* Build one day: completed matches from the sweep + (today) the
+   fixtures list for scheduled and live matches. Completed wins. */
+function composeDay(d, finished, fixtures, errors = []) {
+  const rows = [];
+  const seen = new Map();
+
+  for (const m of finished) {
+    if (dayOf(m) !== d) continue;
+    const k = pairKey(m);
+    if (seen.has(k)) continue;
+    seen.set(k, m);
+    rows.push(m);
+  }
+
+  for (const f of fixtures || []) {
+    const k = pairKey(f);
+    const done = seen.get(k);
+    if (done) {
+      if (!done.round && f.round) done.round = f.round;   // results rows lack round names
+      continue;
+    }
+    seen.set(k, f);
+    rows.push(f);
+  }
+
+  const rankOf = m => (m.category in CATEGORY_ORDER ? CATEGORY_ORDER[m.category] : 5);
+  const matches = rows.sort(
+    (p, q) =>
+      rankOf(p) - rankOf(q) ||
+      String(p.tournament).localeCompare(String(q.tournament)) ||
+      Number(q.live) - Number(p.live) ||
+      String(p.start).localeCompare(String(q.start))
+  );
 
   return {
     ok: true,
@@ -636,56 +771,71 @@ async function fetchToday(env, d) {
     date: d,
     count: matches.length,
     completedCount: matches.filter(m => m.completed).length,
-    errors,
+    errors: matches.length ? [] : errors,
     matches
   };
 }
 
-async function today(env) {
+/* Rebuild the stored view of every recent day from what is in KV
+   (no upstream requests). */
+async function rebuildDays(env, extraErrors = []) {
+  const finished = await storedResults(env);
+  const now = new Date();
+  const out = {};
 
-  const d = new Date()
-    .toISOString()
-    .slice(0, 10);
-
-  return resultsForDate(env, d);
+  for (let i = 0; i < 14; i++) {
+    const d = dateOffset(now, -i);
+    const fix = await kvGet(env, `fix:${d}`);
+    const payload = composeDay(d, finished, fix?.matches, extraErrors);
+    if (payload.count || i < RECENT_DAYS) {
+      await refreshCache(env, `res4:${d}`, i === 0 ? TODAY_TTL : PAST_RESULTS_TTL, async () => payload);
+      out[d] = payload.count;
+    }
+  }
+  return out;
 }
 
+/* Visitor request for a day that isn't stored yet.
+   Today: fetch fixtures (2 requests). If the site has never swept,
+   sweep once so the recent days fill in straight away. Older days
+   are built from stored data only (no requests). */
+async function fetchDay(env, d) {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  let errors = [];
+
+  if (d === todayIso) {
+    const r = await fetchFixtures(env, d);
+    errors = r.errors;
+  }
+
+  const last = await kvGet(env, SWEEP_KEY);
+  const lockKey = "sweep:lock";
+  if (!last && !(await kvGet(env, lockKey))) {
+    await kvPut(env, lockKey, { at: new Date().toISOString() }, 300);
+    const sw = await sweepResults(env);
+    errors = errors.concat(sw.errors);
+  }
+
+  const finished = await storedResults(env);
+  const fix = await kvGet(env, `fix:${d}`);
+  return composeDay(d, finished, fix?.matches, errors);
+}
+
+async function today(env) {
+  return resultsForDate(env, new Date().toISOString().slice(0, 10));
+}
 
 async function yesterday(env) {
-  const d = new Date(Date.now() - 24 * 60 * 60 * 1000)
-    .toISOString()
-    .slice(0, 10);
-
-  return resultsForDate(env, d);
+  return resultsForDate(env, dateOffset(new Date(), -1));
 }
 
-
-/* =====================================================
-   RESULTS FOR ANY DATE
-
-   Today's date gets a 12h TTL (results can still change
-   over the day). Any other date is a day that has already
-   finished, so its results are final - cache those for a
-   full week instead of re-hitting the upstream API for
-   dates users are just browsing back through.
-   ===================================================== */
-
 async function resultsForDate(env, date) {
-
-  const todayIso = new Date()
-    .toISOString()
-    .slice(0, 10);
-
-  const ttl =
-    date === todayIso
-      ? TODAY_TTL
-      : PAST_RESULTS_TTL;
-
+  const todayIso = new Date().toISOString().slice(0, 10);
   return cached(
     env,
-    `res3:${date}`,
-    ttl,
-    () => fetchToday(env, date)
+    `res4:${date}`,
+    date === todayIso ? TODAY_TTL : PAST_RESULTS_TTL,
+    () => fetchDay(env, date)
   );
 }
 
@@ -696,7 +846,7 @@ async function resultsForDate(env, date) {
 
 async function debug(env) {
   const d = new Date().toISOString().slice(0, 10);
-  const key = `res3:${d}`;
+  const key = `res4:${d}`;
   let cachedToday = null;
   let error = null;
 
@@ -826,12 +976,24 @@ async function fetchCalendar(env, y) {
     if (t.id && t.category) levelIds[t.id] = t.category;
   }
 
+  // events running now or finished in the last 4 days: the results
+  // sweep fetches their completed matches
+  const recentFrom = new Date(Date.now() - 4 * 86400000).toISOString().slice(0, 10);
+  const recent = all
+    .filter(t =>
+      t.id && t.category && t.start &&
+      String(t.start).slice(0, 10) <= todayIso &&
+      (!t.end || String(t.end).slice(0, 10) >= recentFrom)
+    )
+    .map(t => ({ id: t.id, tour: t.tour, name: t.name, category: t.category }));
+
   if (tournaments.length) {
     return {
       year: y,
       source: "api",
       apiCount: all.length,
       levelIds,
+      recent,
       tournaments
     };
   }
@@ -853,7 +1015,7 @@ async function calendar(env) {
 
   return cached(
     env,
-    `calendar2:${y}`,
+    `calendar3:${y}`,
     CALENDAR_TTL,
     () => fetchCalendar(env, y)
   );
@@ -1285,7 +1447,7 @@ export default {
       const y = now.getUTCFullYear();
 
       const jobs = [
-        [`calendar2:${y}`, CALENDAR_TTL, () => fetchCalendar(env, y)],
+        [`calendar3:${y}`, CALENDAR_TTL, () => fetchCalendar(env, y)],
         ["rankings:atp", RANKINGS_TTL, () => fetchRankings(env, "atp")],
         ["rankings:wta", RANKINGS_TTL, () => fetchRankings(env, "wta")]
       ];
@@ -1297,34 +1459,36 @@ export default {
         const due =
           hour === 0 ||
           (hour === 12 && !(await readGood(env, key))) ||
-          (key.startsWith("calendar2") && !(await readGood(env, key)) && hour % 8 === 0);
+          (key.startsWith("calendar3") && !(await readGood(env, key)) &&
+            !(await kvGet(env, "calendar:tried")));
+
+        if (due && key.startsWith("calendar3")) {
+          await kvPut(env, "calendar:tried", { at: now.toISOString() }, 8 * 3600);
+        }
 
         if (due) {
           await step(() => refreshCache(env, key, ttl, fetcher));
         }
       }
 
-      // 2) Today: finished results + scheduled/in-progress fixtures,
-      //    refreshed on every run (6x/day).
-      await step(() =>
-        refreshCache(env, `res3:${d}`, TODAY_TTL, () => fetchToday(env, d))
-      );
+      // 2) Today's fixtures: schedule, live and today's played scores
+      //    (2 requests, every run = 12/day).
+      let fixErrors = [];
+      await step(async () => {
+        fixErrors = (await fetchFixtures(env, d)).errors;
+      });
 
-      // 3) The previous days (RECENT_DAYS = today + last 3), results only.
-      //    Yesterday is re-checked at 00:00 and 08:00 UTC to catch late
-      //    finishes; older days are only backfilled when missing/empty.
-      for (let offset = 1; offset < RECENT_DAYS; offset++) {
-        const dd = dateOffset(now, -offset);
-        const key = `res3:${dd}`;
-
-        const force = offset === 1 && (hour === 0 || hour === 8);
-
-        if (force || !(await readGood(env, key))) {
-          await step(() =>
-            refreshCache(env, key, PAST_RESULTS_TTL, () => fetchToday(env, dd))
-          );
-        }
+      // 3) Completed matches per tournament (about 1 request per running
+      //    event) at 00, 08, 12 and 20 UTC, or whenever never done.
+      let sweepErrors = [];
+      if (SWEEP_HOURS.includes(hour) || !(await kvGet(env, SWEEP_KEY))) {
+        await step(async () => {
+          sweepErrors = (await sweepResults(env)).errors;
+        });
       }
+
+      // 4) Rebuild every recent day from stored data (no requests).
+      await step(() => rebuildDays(env, fixErrors.concat(sweepErrors)));
 
     })());
   },
@@ -1390,48 +1554,56 @@ export default {
       }
 
 
-      /* CHECK: one live RapidAPI call, no cache. Shows whether the key
-         works, how many requests are left today, and a sample row.
-         Costs 1 request - open it only when something looks wrong. */
+      /* CHECK: status of the results engine. No upstream requests. */
 
       if (u.pathname === "/api/check") {
-        const dd = dateOffset(new Date(), -1);
-        const path = listPath("atp", "results", dd).replace("pageSize=500", "pageSize=3");
-        const out = {
+        const todayIso = new Date().toISOString().slice(0, 10);
+        const fix = await kvGet(env, `fix:${todayIso}`);
+        const days = [];
+        for (let i = 0; i < RECENT_DAYS; i++) {
+          const dd = dateOffset(new Date(), -i);
+          const v = await kvGet(env, `res4:${dd}`);
+          days.push({
+            date: dd,
+            matches: v?.count || 0,
+            completed: v?.completedCount || 0,
+            errors: v?.errors || []
+          });
+        }
+        return J({
           version: VERSION,
           apiConfigured: Boolean(env.TENNIS_API_KEY),
           cacheConfigured: Boolean(env.TENNIS_CACHE),
-          request: path
-        };
-        try {
-          const d = await call(path, env);
-          const rows = arr(d);
-          out.ok = true;
-          out.topLevelKeys = d && typeof d === "object" ? Object.keys(d) : [];
-          out.rowCount = rows.length;
-          out.sampleRow = rows[0] || null;
-          out.parsedSample = rows[0] ? match(rows[0], "atp", "result") : null;
-        } catch (e) {
-          out.ok = false;
-          out.error = e.message || String(e);
+          fixturesToday: fix?.matches?.length || 0,
+          lastSweep: await kvGet(env, SWEEP_KEY),
+          nextSweepTargets: (await sweepTargets(env)).map(t => `${t.tour.toUpperCase()} ${t.name || t.id}`),
+          recentDays: days
+        });
+      }
+
+      /* REFRESH: run the full update now (fixtures + sweep + rebuild).
+         Uses about 2 + 1 per running tournament requests, so it is
+         limited to once an hour. */
+
+      if (u.pathname === "/api/refresh") {
+        const last = await kvGet(env, "refresh:last");
+        if (last && Date.now() - Date.parse(last.at) < 3600000) {
+          return J({ ok: false, message: "Already refreshed in the last hour.", last });
         }
-        out.quota = lastQuota;
-        const cachedKeys = [];
-        if (env.TENNIS_CACHE) {
-          for (let i = 0; i < RECENT_DAYS; i++) {
-            const k = `res3:${dateOffset(new Date(), -i)}`;
-            const v = await env.TENNIS_CACHE.get(k, "json").catch(() => null);
-            cachedKeys.push({
-              date: k.slice(5),
-              cached: Boolean(v),
-              matches: v?.count || 0,
-              errors: v?.errors || [],
-              cachedAt: v?.cachedAt || null
-            });
-          }
-        }
-        out.recentDays = cachedKeys;
-        return J(out);
+        await kvPut(env, "refresh:last", { at: new Date().toISOString() }, 7200);
+        const todayIso = new Date().toISOString().slice(0, 10);
+        const fx = await fetchFixtures(env, todayIso);
+        const sw = await sweepResults(env);
+        const days = await rebuildDays(env, fx.errors.concat(sw.errors));
+        return J({
+          ok: true,
+          version: VERSION,
+          fixturesToday: fx.matches.length,
+          tournamentsFetched: sw.fetched,
+          errors: fx.errors.concat(sw.errors),
+          matchesPerDay: days,
+          quota: lastQuota
+        });
       }
 
 

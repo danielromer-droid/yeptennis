@@ -139,15 +139,20 @@ The site used the API's **fixtures** endpoint for every day. Fixtures is the
   (or the `*.workers.dev` address shown in Cloudflare), not yepfootball.com.
 
 
-## v7 changes
-- **iPhone menu fixed**: the ☰ button was opening the hidden desktop menu instead
-  of the mobile one. It now opens the mobile menu, turns into ✕ to close it, and
-  closes itself when you tap a link.
-- **Clear message when scores can't load**: instead of "No matches", the Results
-  section now says why (daily RapidAPI limit reached, key rejected, or provider down).
-- **New check page**: `/api/check` makes ONE live call and shows whether the key works,
-  how many RapidAPI requests are left today, a sample match, and which of the last
-  4 days are cached. Use it only when something looks wrong (it costs 1 request).
-- Saves requests: if the results endpoint rejects the `include` option, the worker
-  remembers it for a week instead of paying an extra request every time.
-- Cache keys renamed to `res3:*` so earlier empty snapshots are ignored.
+## v8: how scores work now
+Your RapidAPI plan does NOT have the "results by date" route (it answers
+"Endpoint does not exist"), so the site no longer uses it:
+- **Today**: fixtures by date (2 requests per run, every 4 hours) give the
+  schedule and live scores. Matches that were played between two runs stay
+  listed as "Played · final score soon" until their final score arrives.
+- **Finished scores (today and the last 3 days)**: tournament results, one request
+  per ATP/WTA 250-and-up event that is running or just ended, at 00, 08, 12 and
+  20 UTC. Each tournament's matches are split into days by match date.
+  Challengers and ITF events are not swept (too many requests for the free plan).
+- `/api/check` (no requests): which tournaments are swept, when the last sweep ran,
+  and how many matches each of the last 4 days has.
+- `/api/refresh`: runs the full update immediately (about 2 + 1 per tournament
+  requests; allowed once an hour). Use it once right after deploying.
+- Expected usage: about 12 (fixtures) + 12-20 (sweeps) + 3-4 (calendar/rankings)
+  = roughly 30-36 requests a day, under the free plan's 50.
+- Also in this version: iPhone menu fix, clear error messages when scores can't load.
