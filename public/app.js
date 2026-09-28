@@ -536,8 +536,14 @@ function renderResults() {
       if (match.live) {
         status = "LIVE";
       }
-      else if (match.completed) {
-        status = "Completed";
+      else if (!match.completed && match.start) {
+        const t = new Date(match.start);
+        if (!Number.isNaN(t.getTime())) {
+          status = "Scheduled · " + t.toLocaleTimeString(
+            "en-GB",
+            { hour: "2-digit", minute: "2-digit" }
+          );
+        }
       }
 
       const round =
@@ -547,8 +553,8 @@ function renderResults() {
 
       article.innerHTML = `
         <div class="match-players">
-          <b>${player1}</b>
-          <b>${player2}</b>
+          <b class="${match.winner === 1 ? "winner" : ""}">${player1}${match.winner === 1 ? " ✓" : ""}</b>
+          <b class="${match.winner === 1 ? "loser" : ""}">${player2}</b>
           ${round}
         </div>
 

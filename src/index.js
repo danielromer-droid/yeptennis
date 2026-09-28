@@ -1,4 +1,4 @@
-const VERSION = "YepTennis Worker 2026-09-28.1";
+const VERSION = "YepTennis Worker 2026-09-28.2";
 
 const HOST = "tennis-api-atp-wta-itf.p.rapidapi.com";
 const BASE = `https://${HOST}`;
@@ -141,11 +141,13 @@ async function call(path, env) {
   }
 
   if (!r.ok) {
-    throw Error(
+    const err = Error(
       d.message ||
       d.error ||
       `Tennis API HTTP ${r.status}`
     );
+    err.status = r.status;
+    throw err;
   }
 
   return d;
@@ -292,79 +294,82 @@ function classify(name, levelRaw) {
   return "";
 }
 
-function match(x, tour) {
-  const a = player(
-    x.player1 || x.home
-  );
+/* Build one match row from either API shape:
+   - FIXTURES rows: schedule; `result` empty until played; `live` holds the
+     in-progress score; player1 is just the first-listed player.
+   - RESULTS rows: finished; `result` is the score; player1 is the WINNER.
+   `kind` tells us which one we were given. `levels` is an optional
+   tournamentId -> category lookup built from the calendar. */
 
-  const b = player(
-    x.player2 || x.away
-  );
+function match(x, tour, kind = "fixture", levels = null) {
+  const a = player(x.player1 || x.home);
+  const b = player(x.player2 || x.away);
 
-  const status = val(
-    x,
-    ["status", "matchStatus", "state"],
-    "Scheduled"
-  );
+  const t =
+    x.tournament && typeof x.tournament === "object"
+      ? x.tournament
+      : {};
+
+  const tournamentId =
+    t.id || x.tournamentId || null;
 
   const tournament =
-    typeof x.tournament === "object"
-      ? val(
-          x.tournament,
-          ["name"],
-          ""
-        )
-      : val(
-          x,
-          ["tournamentName"],
-          ""
-        );
+    val(t, ["name"], "") ||
+    val(x, ["tournamentName"], "");
 
   const level =
-    typeof x.tournament === "object"
-      ? val(
-          x.tournament,
-          ["tier", "level", "category"],
-          ""
-        )
-      : val(
-          x,
-          ["level", "tier", "category"],
-          ""
-        );
+    val(t, ["tier", "level", "category"], "") ||
+    t.rank?.name ||
+    t.round?.name ||
+    val(x, ["level", "tier", "category"], "");
 
   const round =
-    typeof x.round === "object"
-      ? val(
-          x.round,
-          ["name"],
-          ""
-        )
-      : val(
-          x,
-          ["round", "roundName"],
-          ""
-        );
+    x.round && typeof x.round === "object"
+      ? val(x.round, ["name"], "")
+      : val(x, ["round", "roundName"], "");
 
   const start = val(
     x,
-    [
-      "startTime",
-      "timeGame",
-      "date",
-      "start"
-    ],
+    ["startTime", "date", "timeGame", "start"],
     ""
   );
 
-  const status_str = String(status);
+  const resultText =
+    typeof x.result === "string" ? x.result.trim() : "";
+
+  const liveText =
+    typeof x.live === "string" ? x.live.trim() : "";
+
+  const finished =
+    kind === "result" ||
+    (Boolean(resultText) && !liveText);
+
+  const isLive =
+    !finished &&
+    (Boolean(liveText) ||
+      /live|inplay|in play/i.test(String(x.status || "")));
+
+  let status = "Scheduled";
+
+  if (finished) {
+    const rt = String(x.result_type || "").toLowerCase();
+    status =
+      rt === "retired" ? "Retired"
+      : rt === "walkover" ? "Walkover"
+      : rt === "default" ? "Default"
+      : "Completed";
+  }
+  else if (isLive) {
+    status = "Live";
+  }
+
+  const category =
+    (levels && tournamentId && levels[tournamentId]) ||
+    classify(tournament, level) ||
+    (t.rankId === 4 ? "Grand Slam" : t.rankId === 3 ? "1000" : "");
 
   return {
-    id: val(
-      x,
-      ["id", "matchId"],
-      null
-    ),
+    id: val(x, ["matchId", "id"], null),
 
     tour,
 
@@ -380,28 +385,27 @@ function match(x, tour) {
     rank1: a.rank,
     rank2: b.rank,
 
-    score: extractScore(x),
+    seed1: x.seed1 || "",
+    seed2: x.seed2 || "",
 
-    status: status_str,
+    // 1 = player1 won (results rows only)
+    winner: finished ? 1 : 0,
 
-    live:
-      Boolean(x.live) ||
-      /live|inplay|in play/i.test(status_str),
+    score: finished ? resultText : (liveText || ""),
 
-    completed:
-      /finished|completed|final|ended/i.test(status_str),
+    status,
+
+    live: isLive,
+
+    completed: finished,
 
     tournament,
 
-    tournamentId:
-      x.tournament?.id ||
-      x.tournamentId ||
-      null,
+    tournamentId,
 
     level,
 
-    category:
-      classify(tournament, level),
+    category,
 
     round,
 
@@ -425,7 +429,31 @@ function masters(x, tour) {
     x.rankName ||
     "";
 
+  const startDate = val(
+    x,
+    ["date", "startDate", "start", "dateStart", "startTime"]
+  );
+
+  const rankId = x.rankId || x.rank?.id || null;
+
+  const category =
+    classify(name, `${tier || ""} ${rank || ""} ${x.round?.name || ""}`) ||
+    (rankId === 4 ? "Grand Slam" : rankId === 3 ? "1000" : "");
+
+  // The API stores no end date. Slams and Masters run ~2 weeks,
+  // everything else one tennis week (Mon-Sun).
+  const spanDays = category === "Grand Slam" || category === "1000" ? 13 : 6;
+
+  const computedEnd =
+    startDate
+      ? new Date(new Date(startDate).getTime() + spanDays * 86400000)
+          .toISOString()
+          .slice(0, 10)
+      : "";
+
   return {
+    id: x.id || null,
+
     name,
 
     tour,
@@ -434,8 +462,7 @@ function masters(x, tour) {
       tier ||
       rank,
 
-    category:
-      classify(name, tier || rank),
+    category,
 
     start: val(
       x,
@@ -448,13 +475,7 @@ function masters(x, tour) {
       ]
     ),
 
-    end: val(
-      x,
-      [
-        "endDate",
-        "end"
-      ]
-    ),
+    end: val(x, ["endDate", "end"]) || computedEnd,
 
     country:
       x.country?.name ||
@@ -473,123 +494,123 @@ function masters(x, tour) {
    TODAY (cached, at most 2 upstream refreshes/day)
    ===================================================== */
 
+/* tournamentId -> category ("Grand Slam" / "1000" / "500" / "250"),
+   read from the cached calendar. Lets us tag 500 vs 250 correctly,
+   because match rows only carry a tournament id and name. */
+
+async function levelLookup(env) {
+  const y = new Date().getUTCFullYear();
+  const cal = await readGood(env, `calendar2:${y}`);
+  const out = { ...(cal?.levelIds || {}) };
+
+  for (const t of cal?.tournaments || []) {
+    if (t.id && t.category) out[t.id] = t.category;
+  }
+
+  return out;
+}
+
+const CATEGORY_ORDER = {
+  "Grand Slam": 0,
+  "Finals": 1,
+  "1000": 2,
+  "500": 3,
+  "250": 4
+};
+
+const listPath = (tour, kind, d) =>
+  `/tennis/v2/${tour}/${kind}/${d}?pageNo=1&pageSize=500&filter=PlayerGroup:singles`;
+
+/* Results rows are asked with include=round,tournament so we get the
+   tournament name and round. If the API rejects the parameter, retry
+   plain - the rows still carry scores. */
+async function callResults(tour, d, env) {
+  try {
+    return await call(listPath(tour, "results", d) + "&include=round,tournament", env);
+  }
+  catch (e) {
+    if (e.status === 400 || e.status === 422) {
+      return call(listPath(tour, "results", d), env);
+    }
+    throw e;
+  }
+}
+
+/* One day of matches.
+   - Past days: the RESULTS endpoint (finished matches, real scores).
+   - Today: RESULTS (finished so far) + FIXTURES (scheduled and in
+     progress; `live` holds the running score), de-duplicated.
+   Fixtures alone never held final scores - that is why old days looked
+   empty. */
+
 async function fetchToday(env, d) {
 
-  const [
-    a,
-    w,
-    l
-  ] =
-    await Promise.allSettled([
+  const isToday =
+    d === new Date().toISOString().slice(0, 10);
 
-      call(
-        `/tennis/v2/atp/fixtures/${d}?include=round,tournament&pageNo=1&pageSize=100&filter=PlayerGroup:singles`,
-        env
-      ),
+  const jobs = [
+    callResults("atp", d, env),
+    callResults("wta", d, env)
+  ];
 
-      call(
-        `/tennis/v2/wta/fixtures/${d}?include=round,tournament&pageNo=1&pageSize=100&filter=PlayerGroup:singles`,
-        env
-      ),
-
-      // live scores only make sense for today; past days are final
-      d === new Date().toISOString().slice(0, 10)
-        ? call(`/tennis/v2/extend/api/events/live`, env)
-        : Promise.resolve(null)
-
-    ]);
-
-  let matches = [];
-
-  if (a.status === "fulfilled") {
-
-    matches.push(
-      ...arr(a.value).map(
-        x => match(x, "atp")
-      )
+  if (isToday) {
+    jobs.push(
+      call(listPath("atp", "fixtures", d) + "&include=round,tournament", env),
+      call(listPath("wta", "fixtures", d) + "&include=round,tournament", env)
     );
-
   }
 
-  if (w.status === "fulfilled") {
+  const [ra, rw, fa, fw] = await Promise.allSettled(jobs);
 
-    matches.push(
-      ...arr(w.value).map(
-        x => match(x, "wta")
-      )
-    );
+  const levels = await levelLookup(env);
 
-  }
+  const rows = [];
+  const seen = new Set();
 
-  if (l.status === "fulfilled") {
+  const add = (settled, tour, kind) => {
+    if (!settled || settled.status !== "fulfilled") return;
 
-    for (
-      const x of arr(l.value)
-    ) {
+    for (const x of arr(settled.value)) {
+      const m = match(x, tour, kind, levels);
 
-      const p1 = val(
-        x,
-        [
-          "player1",
-          "player1Name"
-        ],
-        ""
-      );
+      // results win over fixtures if a match shows up in both
+      const key = m.id ? `${tour}:${m.id}` : null;
+      if (key && seen.has(key)) continue;
+      if (key) seen.add(key);
 
-      const p2 = val(
-        x,
-        [
-          "player2",
-          "player2Name"
-        ],
-        ""
-      );
-
-      const found =
-        matches.find(
-          z =>
-            (
-              z.player1 === p1 &&
-              z.player2 === p2
-            ) ||
-            (
-              z.player1 === p2 &&
-              z.player2 === p1
-            )
-        );
-
-      if (found) {
-
-        found.live = true;
-
-        found.status = "Live";
-
-        const liveScore =
-          val(
-            x,
-            [
-              "score",
-              "result"
-            ],
-            ""
-          );
-
-        if (liveScore) {
-          found.score =
-            liveScore;
-        }
-
-      }
-
+      rows.push(m);
     }
+  };
 
-  }
+  add(ra, "atp", "result");
+  add(rw, "wta", "result");
+  add(fa, "atp", "fixture");
+  add(fw, "wta", "fixture");
+
+  const rankOf = m =>
+    m.category in CATEGORY_ORDER ? CATEGORY_ORDER[m.category] : 5;
+
+  const matches =
+    rows.sort(
+      (p, q) =>
+        rankOf(p) - rankOf(q) ||
+        String(p.tournament).localeCompare(String(q.tournament)) ||
+        Number(q.live) - Number(p.live) ||
+        String(p.start).localeCompare(String(q.start))
+    );
+
+  const errors =
+    [ra, rw, fa, fw]
+      .filter(r => r && r.status === "rejected")
+      .map(r => String(r.reason?.message || r.reason));
 
   return {
     ok: true,
     version: VERSION,
     date: d,
     count: matches.length,
+    completedCount: matches.filter(m => m.completed).length,
+    errors,
     matches
   };
 }
@@ -636,7 +657,7 @@ async function resultsForDate(env, date) {
 
   return cached(
     env,
-    `results:${date}`,
+    `res2:${date}`,
     ttl,
     () => fetchToday(env, date)
   );
@@ -649,7 +670,7 @@ async function resultsForDate(env, date) {
 
 async function debug(env) {
   const d = new Date().toISOString().slice(0, 10);
-  const key = `results:${d}`;
+  const key = `res2:${d}`;
   let cachedToday = null;
   let error = null;
 
@@ -729,10 +750,20 @@ function fallbackCalendar(y, now = new Date()) {
 
 async function fetchCalendar(env, y) {
 
+  // TourRank: 2 = Main tour (250/500), 3 = Masters 1000, 4 = Grand Slam
+  // (1 = Challenger/ITF, which we leave out). `since` starts 3 weeks back
+  // so events still in progress - and the ones needed to tag recent
+  // results with their level - are included.
+  const since =
+    new Date(Date.now() - 21 * 86400000).toISOString().slice(0, 10);
+
+  const q =
+    `?pageNo=1&pageSize=300&since=${since}&filter=TourRank:2,3,4`;
+
   const [a, w] =
     await Promise.allSettled([
-      call(`/tennis/v2/atp/tournament/calendar/${y}?pageNo=1&pageSize=200`, env),
-      call(`/tennis/v2/wta/tournament/calendar/${y}?pageNo=1&pageSize=200`, env)
+      call(`/tennis/v2/atp/tournament/calendar/${y}${q}`, env),
+      call(`/tennis/v2/wta/tournament/calendar/${y}${q}`, env)
     ]);
 
   const todayIso =
@@ -762,11 +793,19 @@ async function fetchCalendar(env, y) {
     .filter(r => r.status === "rejected")
     .map(r => String(r.reason?.message || r.reason));
 
+  // every classified event, including ones that already ended, so recent
+  // results can still be tagged Grand Slam / 1000 / 500 / 250
+  const levelIds = {};
+  for (const t of all) {
+    if (t.id && t.category) levelIds[t.id] = t.category;
+  }
+
   if (tournaments.length) {
     return {
       year: y,
       source: "api",
       apiCount: all.length,
+      levelIds,
       tournaments
     };
   }
@@ -788,7 +827,7 @@ async function calendar(env) {
 
   return cached(
     env,
-    `calendar:${y}`,
+    `calendar2:${y}`,
     CALENDAR_TTL,
     () => fetchCalendar(env, y)
   );
@@ -1208,47 +1247,47 @@ export default {
 
     ctx.waitUntil((async () => {
 
-      // 1) Today's scores + live matches: refreshed on every run (6x/day).
+      const y = now.getUTCFullYear();
+
+      const jobs = [
+        [`calendar2:${y}`, CALENDAR_TTL, () => fetchCalendar(env, y)],
+        ["rankings:atp", RANKINGS_TTL, () => fetchRankings(env, "atp")],
+        ["rankings:wta", RANKINGS_TTL, () => fetchRankings(env, "wta")]
+      ];
+
+      // 1) Calendar + rankings: daily at 00:00 UTC, and retried at
+      //    12:00 UTC if missing / only the approximate fallback. Run first,
+      //    because the calendar is what tags results as 1000 / 500 / 250.
+      for (const [key, ttl, fetcher] of jobs) {
+        const due =
+          hour === 0 ||
+          (hour === 12 && !(await readGood(env, key))) ||
+          (key.startsWith("calendar2") && !(await readGood(env, key)) && hour % 8 === 0);
+
+        if (due) {
+          await step(() => refreshCache(env, key, ttl, fetcher));
+        }
+      }
+
+      // 2) Today: finished results + scheduled/in-progress fixtures,
+      //    refreshed on every run (6x/day).
       await step(() =>
-        refreshCache(env, `results:${d}`, TODAY_TTL, () => fetchToday(env, d))
+        refreshCache(env, `res2:${d}`, TODAY_TTL, () => fetchToday(env, d))
       );
 
-      // 2) The previous days (RECENT_DAYS = today + last 3).
-      //    Yesterday gets one forced refresh at 08:00 UTC to pick up
-      //    matches that were still live at the last "today" snapshot.
-      //    Older days are only backfilled when missing/empty, which keeps
-      //    RapidAPI usage to about 3 calls per run in steady state.
+      // 3) The previous days (RECENT_DAYS = today + last 3), results only.
+      //    Yesterday is re-checked at 00:00 and 08:00 UTC to catch late
+      //    finishes; older days are only backfilled when missing/empty.
       for (let offset = 1; offset < RECENT_DAYS; offset++) {
         const dd = dateOffset(now, -offset);
-        const key = `results:${dd}`;
+        const key = `res2:${dd}`;
 
-        const force = offset === 1 && hour === 8;
+        const force = offset === 1 && (hour === 0 || hour === 8);
 
         if (force || !(await readGood(env, key))) {
           await step(() =>
             refreshCache(env, key, PAST_RESULTS_TTL, () => fetchToday(env, dd))
           );
-        }
-      }
-
-      // 3) Calendar + rankings: refreshed daily at 00:00 UTC, and retried
-      //    at 12:00 UTC if the cache is missing or only holds the
-      //    approximate fallback calendar.
-      const y = now.getUTCFullYear();
-
-      const jobs = [
-        [`calendar:${y}`, CALENDAR_TTL, () => fetchCalendar(env, y)],
-        ["rankings:atp", RANKINGS_TTL, () => fetchRankings(env, "atp")],
-        ["rankings:wta", RANKINGS_TTL, () => fetchRankings(env, "wta")]
-      ];
-
-      for (const [key, ttl, fetcher] of jobs) {
-        const due =
-          hour === 0 ||
-          (hour === 12 && !(await readGood(env, key)));
-
-        if (due) {
-          await step(() => refreshCache(env, key, ttl, fetcher));
         }
       }
 

@@ -109,3 +109,19 @@ BBC Sport RSS and ATP Tour RSS are used for news. BBC requires attribution when 
   (`/api/player-bio?name=...`, cached 30 days in KV) and a link to their page.
 - Approx. RapidAPI usage in steady state: ~3 calls x 6 runs/day for today
   (~18/day, ~550/month) plus daily calendar/rankings refreshes and rare backfills.
+
+
+## Fix: scores for past days (why days looked empty)
+The site used the API's **fixtures** endpoint for every day. Fixtures is the
+*schedule*: no final scores, and matches drop out once played. Now:
+- **Past days** use `/tennis/v2/{atp|wta}/results/{date}` (finished matches, real
+  scores; `player1` is the winner, marked with a check).
+- **Today** = results so far + fixtures (scheduled, and the in-progress score
+  from the `live` field), de-duplicated. The separate live-events call was dropped.
+- Tournament levels (Grand Slam / 1000 / 500 / 250) are tagged from the calendar
+  by tournament id; matches from other events (Challengers etc.) sort last.
+- The calendar now asks the API only for TourRank 2,3,4 (250/500, Masters, Slams)
+  from 3 weeks back, so it is no longer swamped by Challenger/ITF rows.
+- Cache keys were renamed (`res2:*`, `calendar2:*`) so old schedule-only data is ignored.
+- RapidAPI free plan = 50 requests/day. Usage now: 4 calls x 6 runs (today) + 4 for
+  yesterday re-checks + ~4 calendar/rankings = about 32/day. Visitors add none.

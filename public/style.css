@@ -1095,3 +1095,7 @@ button { font: inherit; }
   font-size: 12px;
   line-height: 1.45;
 }
+
+/* winner / loser lines on finished matches */
+.match-players b.winner { color: var(--ink); }
+.match-players b.loser  { color: var(--muted); font-weight: 600; }
