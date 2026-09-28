@@ -91,3 +91,21 @@ Do NOT manually create a CNAME from `yeptennis.com` to another `*.pages.dev` hos
 The tennis data is supplied by the Tennis API - ATP WTA ITF product on RapidAPI. The API documentation says the product covers ATP/WTA fixtures, rankings, players and tournament calendars, and provides live routes. Some advanced live/Socket.IO features require higher plans.
 
 BBC Sport RSS and ATP Tour RSS are used for news. BBC requires attribution when its RSS feed is displayed; YepTennis labels BBC Sport as the source.
+
+
+## Update: populated sections (latest)
+- **Scores, last 4 days**: quick chips for Today / Yesterday / the 2 days before,
+  plus ←/→ for anything older. A cron (every 4 hours = 6 runs/day) refreshes
+  today's scores + live matches each run, refreshes yesterday once a day, and
+  backfills any of the previous 3 days that are missing.
+- **Failed/empty upstream fetches never overwrite good data** (e.g. when the
+  RapidAPI quota is reached, the last good snapshot keeps being served).
+- **Calendar**: uses the live API; if it returns nothing usable it shows the
+  typical annual schedule of Slams / 1000s / Finals (approximate months) instead
+  of a blank section. Check `/api/calendar` -> `source` ("api" or "fallback"),
+  `apiCount` and `errors` to see which one you're getting.
+- **News**: BBC Sport (then ATP Tour) with title + short description, cached 30 min.
+- **Rankings**: top 20 with a one-line bio per player from Wikipedia
+  (`/api/player-bio?name=...`, cached 30 days in KV) and a link to their page.
+- Approx. RapidAPI usage in steady state: ~3 calls x 6 runs/day for today
+  (~18/day, ~550/month) plus daily calendar/rankings refreshes and rare backfills.
