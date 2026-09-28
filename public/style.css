@@ -701,14 +701,16 @@ button { font: inherit; }
 }
 
 .news-img{
-  width:90px;
-  height:90px;
-  min-width:90px;
-  flex:0 0 90px;
+  width:160px;
+  min-width:160px;
+  flex:0 0 160px;
+  aspect-ratio:16 / 9;
+  height:auto;
+  object-fit:cover;
+  object-position:center;
   border-radius:6px;
-  background-position:center;
-  background-size:cover;
-  background-repeat:no-repeat;
+  background:#e7ebe8;
+  display:block;
 }
 
 .news-list article > div:last-child{
@@ -1099,3 +1101,12 @@ button { font: inherit; }
 /* winner / loser lines on finished matches */
 .match-players b.winner { color: var(--ink); }
 .match-players b.loser  { color: var(--muted); font-weight: 600; }
+
+/* smaller rectangular news images on phones */
+@media (max-width: 480px) {
+  .news-img {
+    width: 120px;
+    min-width: 120px;
+    flex: 0 0 120px;
+  }
+}

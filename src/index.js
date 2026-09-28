@@ -1113,6 +1113,15 @@ function xml(xml, source) {
       }
 
 
+      // BBC thumbnails come at 240px wide; ask for the 480px version so the
+      // wider rectangular image stays sharp.
+      if (image && /ichef\.bbci\.co\.uk/.test(image)) {
+        image = image.replace(/\/(\d{2,4})\//, (m, w) =>
+          Number(w) < 480 ? "/480/" : m
+        );
+      }
+
+
       return {
 
         title:

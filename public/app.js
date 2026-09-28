@@ -32,6 +32,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupDateNav();
   renderDayChips();
   setupResultTabs();
+  setupTourLinks();
   setupLevelTabs();
   setupRankingsTabs();
 
@@ -207,6 +208,31 @@ function setupResultTabs() {
       resultsFilter = button.dataset.filter || "all";
 
       renderResults();
+
+    });
+
+  });
+
+}
+
+
+/* =========================================================
+   ATP / WTA LINKS (menu, tour bar, footer)
+   Jump to Results with the matching tour tab already selected.
+   ========================================================= */
+
+function setupTourLinks() {
+
+  document.querySelectorAll("[data-tour-link]").forEach(link => {
+
+    link.addEventListener("click", () => {
+
+      const tour = link.dataset.tourLink;
+
+      const tab =
+        document.querySelector(`#results-tabs button[data-filter="${tour}"]`);
+
+      if (tab) tab.click();
 
     });
 

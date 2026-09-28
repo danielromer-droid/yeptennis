@@ -125,3 +125,15 @@ The site used the API's **fixtures** endpoint for every day. Fixtures is the
 - Cache keys were renamed (`res2:*`, `calendar2:*`) so old schedule-only data is ignored.
 - RapidAPI free plan = 50 requests/day. Usage now: 4 calls x 6 runs (today) + 4 for
   yesterday re-checks + ~4 calendar/rankings = about 32/day. Visitors add none.
+
+
+## v6 changes
+- Removed the static "ATP Tour" / "WTA Tour" card panels and the "Finals / 1000 / 500"
+  series blocks: they had no live data and only repeated the level filters.
+- The ATP and WTA links (menu, tour bar, footer) now jump to Results with the
+  ATP or WTA tab already selected.
+- News images are now 16:9 rectangles (160px wide, 120px on phones) and are
+  cropped instead of squashed. BBC thumbnails are requested at 480px so they stay sharp.
+- Testing the API: use your tennis domain, e.g.
+  `https://yeptennis.com/api/results?date=2026-09-27`
+  (or the `*.workers.dev` address shown in Cloudflare), not yepfootball.com.
